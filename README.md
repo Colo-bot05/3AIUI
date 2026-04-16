@@ -33,7 +33,10 @@ src/
     mode-config.ts             # UI用モード定義
     types.ts                   # 会議データ構造
   lib/orchestrator/
-    mock-orchestrator.ts       # 将来差し替え前提のモックロジック
+    provider-adapter.ts        # provider interface
+    provider-registry.ts       # provider選択
+    providers/
+      mock-provider.ts         # 現在のモック実装
 ```
 
 ## Environment Variables
@@ -46,7 +49,7 @@ DATABASE_URL=postgresql://postgres:postgres@db:5432/three_ai_ui
 MEETING_PROVIDER=mock
 ```
 
-今のMVPでは `MEETING_PROVIDER=mock` を前提にしています。将来的には Provider Adapter を追加して、商用LLMやローカルLLMへ差し替える想定です。
+今のMVPでは `MEETING_PROVIDER=mock` を前提にしています。会議実行APIは provider adapter 経由で mock を呼ぶ構造になっており、将来的にはここに商用LLMやローカルLLMの adapter を追加して差し替える想定です。
 
 ## Local Development
 

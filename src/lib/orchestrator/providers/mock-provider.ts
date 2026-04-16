@@ -6,6 +6,8 @@ import type {
   SpeakerRole,
 } from "@/features/meeting/types";
 
+import type { MeetingProviderAdapter } from "@/lib/orchestrator/provider-adapter";
+
 const ROLE_META: Record<SpeakerRole, { label: string; viewpoint: string; emphasis: string }> = {
   vision: {
     label: "構想AI",
@@ -60,18 +62,18 @@ function buildRoleContent(
   const roleParagraphs: Record<SpeakerRole, string[]> = {
     vision: [
       `${modeGuide.intro} テーマ「${theme}」は、3つのAIを単に並べるのではなく、役割を持った会議室として見せると印象が一段上がります。`,
-      `MVPでは、テーマ入力から3視点の意見、そして統合結論までを一画面で流れるように体験させるべきです。入力、議論、結論が一直線につながると“使えそう感”が出ます。`,
-      `将来的には Provider Adapter を差し替えても UI が変わらない構造にしておくと、商用LLMとローカルLLMの両方へ展開しやすくなります。`,
+      "MVPでは、テーマ入力から3視点の意見、そして統合結論までを一画面で流れるように体験させるべきです。入力、議論、結論が一直線につながると“使えそう感”が出ます。",
+      "将来的には Provider Adapter を差し替えても UI が変わらない構造にしておくと、商用LLMとローカルLLMの両方へ展開しやすくなります。",
     ],
     reality: [
-      `実装の現実線としては、まずモックの orchestrator をAPI越しに呼ぶ形にして、UIと生成ロジックの境界を先に作るのが安全です。`,
-      `フロントは App Router の1画面、バックエンド側は /api/meeting/run で十分です。レスポンスの形を先に固定すれば、あとで本物のLLM接続へ差し替えても影響範囲を抑えられます。`,
-      `Docker では app と postgres を先に用意しておき、今回DB未使用でも DATABASE_URL を通しておけば、後続PRで永続化を足しやすくなります。`,
+      "実装の現実線としては、まずモックの orchestrator をAPI越しに呼ぶ形にして、UIと生成ロジックの境界を先に作るのが安全です。",
+      "フロントは App Router の1画面、バックエンド側は /api/meeting/run で十分です。レスポンスの形を先に固定すれば、あとで本物のLLM接続へ差し替えても影響範囲を抑えられます。",
+      "Docker では app と postgres を先に用意しておき、今回DB未使用でも DATABASE_URL を通しておけば、後続PRで永続化を足しやすくなります。",
     ],
     audit: [
-      `注意点は、最初のPRで“全部入り”にしないことです。会話保存、本番接続、AWS固有実装まで触ると、レビュー対象が広がりすぎます。`,
-      `また、見た目を整える一方で、責務が page.tsx に集中すると後で崩れやすいです。UIコンポーネント、型、モックオーケストレータを分けておくべきです。`,
-      `CI では lint / typecheck / build を最小セットに固定し、PR段階で壊れていないことを機械的に確認できる状態を作るのがMVPの守りになります。`,
+      "注意点は、最初のPRで“全部入り”にしないことです。会話保存、本番接続、AWS固有実装まで触ると、レビュー対象が広がりすぎます。",
+      "また、見た目を整える一方で、責務が page.tsx に集中すると後で崩れやすいです。UIコンポーネント、型、モックオーケストレータを分けておくべきです。",
+      "CI では lint / typecheck / build を最小セットに固定し、PR段階で壊れていないことを機械的に確認できる状態を作るのがMVPの守りになります。",
     ],
   };
 
@@ -84,7 +86,7 @@ function buildRoleContent(
   };
 }
 
-export async function runMockMeeting({
+async function runMockMeeting({
   theme,
   mode,
 }: RunMeetingInput): Promise<MeetingRunResult> {
@@ -117,3 +119,8 @@ export async function runMockMeeting({
     generatedAt: new Date().toISOString(),
   };
 }
+
+export const mockMeetingProvider: MeetingProviderAdapter = {
+  name: "mock",
+  runMeeting: runMockMeeting,
+};
