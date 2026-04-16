@@ -1,5 +1,10 @@
 export type MeetingMode = "brainstorm" | "design_review" | "debate";
-export type MeetingProvider = "mock";
+export type MeetingProvider =
+  | "mock"
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "local";
 
 export type SpeakerRole = "vision" | "reality" | "audit";
 

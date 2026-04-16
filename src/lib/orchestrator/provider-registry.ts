@@ -5,16 +5,16 @@ import { mockMeetingProvider } from "@/lib/orchestrator/providers/mock-provider"
 
 const DEFAULT_PROVIDER: MeetingProvider = "mock";
 
-const PROVIDERS: Record<MeetingProvider, MeetingProviderAdapter> = {
+const PROVIDERS: Partial<Record<MeetingProvider, MeetingProviderAdapter>> = {
   mock: mockMeetingProvider,
 };
 
 export function resolveMeetingProvider(providerName?: string): MeetingProviderAdapter {
   if (!providerName) {
-    return PROVIDERS[DEFAULT_PROVIDER];
+    return PROVIDERS[DEFAULT_PROVIDER]!;
   }
 
-  return PROVIDERS[providerName as MeetingProvider] ?? PROVIDERS[DEFAULT_PROVIDER];
+  return PROVIDERS[providerName as MeetingProvider] ?? PROVIDERS[DEFAULT_PROVIDER]!;
 }
 
 export async function runMeetingWithProvider(
