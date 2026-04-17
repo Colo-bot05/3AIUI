@@ -1,12 +1,14 @@
 import type { MeetingProvider, MeetingRunResult, RunMeetingInput } from "@/features/meeting/types";
 
 import type { MeetingProviderAdapter } from "@/lib/orchestrator/provider-adapter";
+import { anthropicMeetingProvider } from "@/lib/orchestrator/providers/anthropic-provider";
 import { mockMeetingProvider } from "@/lib/orchestrator/providers/mock-provider";
 
 const DEFAULT_PROVIDER: MeetingProvider = "mock";
 
 const PROVIDERS: Partial<Record<MeetingProvider, MeetingProviderAdapter>> = {
   mock: mockMeetingProvider,
+  anthropic: anthropicMeetingProvider,
 };
 
 export function resolveMeetingProvider(providerName?: string): MeetingProviderAdapter {
