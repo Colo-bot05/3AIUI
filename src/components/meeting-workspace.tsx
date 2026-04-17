@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { MODE_OPTIONS } from "@/features/meeting/mode-config";
 import {
@@ -20,6 +20,7 @@ import type {
   MeetingRunResult,
   SpeakerRole,
 } from "@/features/meeting/types";
+import { inMemorySessionRepository } from "@/lib/session/in-memory-session-repository";
 
 const DEFAULT_THEME =
   "商用LLMを使って、ローカルLLM構築の設計議論を加速するMVPを考えたい";
@@ -188,6 +189,19 @@ export function MeetingWorkspace() {
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+
+  async function ensureSessionId() {
+    if (sessionIdRef.current) {
+      return sessionIdRef.current;
+    }
+
+    const session = await inMemorySessionRepository.createSession({
+      initialMode: mode,
+    });
+    sessionIdRef.current = session.id;
+    return session.id;
+  }
 
   const hasDuplicateDebateAssignments =
     mode === "debate" &&
@@ -226,6 +240,13 @@ export function MeetingWorkspace() {
 
         setError(null);
         setConversationState("judged");
+        await inMemorySessionRepository.appendEntry({
+          sessionId: await ensureSessionId(),
+          type: "judgment_requested",
+          mode,
+          prompt: trimmedInput || DEFAULT_THEME,
+          conversationState: "judged",
+        });
         return;
       }
     }
@@ -240,6 +261,13 @@ export function MeetingWorkspace() {
 
       setError(null);
       setConversationState("synthesized");
+      await inMemorySessionRepository.appendEntry({
+        sessionId: await ensureSessionId(),
+        type: "synthesis_requested",
+        mode,
+        prompt: trimmedInput,
+        conversationState: "synthesized",
+      });
       return;
     }
 
@@ -263,13 +291,20 @@ export function MeetingWorkspace() {
       setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
       setResult(nextResult);
       setLastDiscussionMode(mode);
-      setConversationState(
+      const nextConversationState =
         mode === "brainstorm"
           ? "brainstorming"
           : mode === "debate"
             ? "awaiting_judgment"
-            : "discussing",
-      );
+            : "discussing";
+      setConversationState(nextConversationState);
+      await inMemorySessionRepository.appendEntry({
+        sessionId: await ensureSessionId(),
+        type: "meeting_generated",
+        mode,
+        prompt: trimmedInput || DEFAULT_THEME,
+        conversationState: nextConversationState,
+      });
     } catch (nextError) {
       setError(
         nextError instanceof Error
