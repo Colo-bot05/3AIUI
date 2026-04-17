@@ -19,6 +19,8 @@ export type ConversationState =
   | "awaiting_judgment"
   | "synthesized"
   | "judged";
+export type DebateModel = "gpt" | "gemini" | "claude";
+export type DebateRole = "pro" | "con" | "judge";
 
 export type SpeakerRole = "vision" | "reality" | "audit";
 
@@ -54,4 +56,10 @@ export interface ConversationStateSnapshot {
   state: ConversationState;
   label: string;
   hint: string;
+}
+
+export interface DebateRoleAssignments {
+  pro: DebateModel | "";
+  con: DebateModel | "";
+  judge: DebateModel | "";
 }

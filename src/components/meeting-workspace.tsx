@@ -11,6 +11,9 @@ import {
 } from "@/features/meeting/state";
 import type {
   ConversationState,
+  DebateModel,
+  DebateRole,
+  DebateRoleAssignments,
   MeetingMessageType,
   MeetingMode,
   MeetingRunResult,
@@ -117,11 +120,23 @@ const PANEL_PLACEHOLDERS = {
   },
 } as const;
 
-const DEBATE_ROLE_PLACEHOLDERS = [
-  { label: "賛成側AI", value: "GPT", helper: "次PRで動的割当" },
-  { label: "反対側AI", value: "Gemini", helper: "次PRで重複禁止" },
-  { label: "審判AI", value: "Claude", helper: "次PRで判定待ち制御" },
+const DEBATE_MODELS: Array<{ value: DebateModel; label: string }> = [
+  { value: "gpt", label: "GPT" },
+  { value: "gemini", label: "Gemini" },
+  { value: "claude", label: "Claude" },
 ];
+
+const DEBATE_ROLE_LABELS: Record<DebateRole, string> = {
+  pro: "賛成側AI",
+  con: "反対側AI",
+  judge: "審判AI",
+};
+
+const INITIAL_DEBATE_ASSIGNMENTS: DebateRoleAssignments = {
+  pro: "gpt",
+  con: "gemini",
+  judge: "claude",
+};
 
 type TimelineEntry = {
   id: string;
@@ -152,12 +167,40 @@ export function MeetingWorkspace() {
   const [result, setResult] = useState<MeetingRunResult>(INITIAL_RESULT);
   const [lastDiscussionMode, setLastDiscussionMode] =
     useState<MeetingMode>("design_review");
+  const [debateAssignments, setDebateAssignments] = useState<DebateRoleAssignments>(
+    INITIAL_DEBATE_ASSIGNMENTS,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const hasDuplicateDebateAssignments =
+    mode === "debate" &&
+    new Set(
+      Object.values(debateAssignments).filter(
+        (value): value is DebateModel => value !== "",
+      ),
+    ).size !== Object.values(debateAssignments).filter(Boolean).length;
+  const hasIncompleteDebateAssignments =
+    mode === "debate" &&
+    Object.values(debateAssignments).some((value) => value === "");
 
   async function handleRun() {
     const trimmedInput = theme.trim();
     const isSynthesisRequest = isExplicitSynthesisTrigger(trimmedInput, mode);
+
+    if (mode === "debate") {
+      setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
+
+      if (hasIncompleteDebateAssignments) {
+        setError("ディベートを開始するには、賛成側・反対側・審判をすべて選択してください。");
+        return;
+      }
+
+      if (hasDuplicateDebateAssignments) {
+        setError("同じAIを複数のディベート役割に割り当てることはできません。");
+        return;
+      }
+    }
 
     if (isSynthesisRequest) {
       setSubmittedPrompt(trimmedInput);
@@ -193,7 +236,11 @@ export function MeetingWorkspace() {
       setResult(nextResult);
       setLastDiscussionMode(mode);
       setConversationState(
-        mode === "brainstorm" ? "brainstorming" : "discussing",
+        mode === "brainstorm"
+          ? "brainstorming"
+          : mode === "debate"
+            ? "debating"
+            : "discussing",
       );
     } catch (nextError) {
       setError(
@@ -214,6 +261,17 @@ export function MeetingWorkspace() {
   const activePlaceholder = PANEL_PLACEHOLDERS[mode];
   const hasSynthesis =
     mode !== "debate" && conversationState === "synthesized";
+  const debateAssignmentSummary = [
+    `${DEBATE_ROLE_LABELS.pro}: ${
+      DEBATE_MODELS.find((item) => item.value === debateAssignments.pro)?.label ?? "未選択"
+    }`,
+    `${DEBATE_ROLE_LABELS.con}: ${
+      DEBATE_MODELS.find((item) => item.value === debateAssignments.con)?.label ?? "未選択"
+    }`,
+    `${DEBATE_ROLE_LABELS.judge}: ${
+      DEBATE_MODELS.find((item) => item.value === debateAssignments.judge)?.label ?? "未選択"
+    }`,
+  ].join("\n");
 
   const synthesisBody = [
     "合意事項",
@@ -244,8 +302,14 @@ export function MeetingWorkspace() {
       label: "テーマ投稿",
       accentClass: "text-zinc-950",
       markerClass: "bg-zinc-950",
-      body: submittedPrompt,
-      meta: `mode: ${activeMode.label}`,
+      body:
+        mode === "debate"
+          ? `${submittedPrompt}\n\n現在の割当\n${debateAssignmentSummary}`
+          : submittedPrompt,
+      meta:
+        mode === "debate"
+          ? `mode: ${activeMode.label} / roles assigned`
+          : `mode: ${activeMode.label}`,
       side: "right",
     },
     ...result.responses.map((response, index) => ({
@@ -490,29 +554,46 @@ export function MeetingWorkspace() {
               <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/70 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold text-zinc-950">
-                    ディベート役割表示
+                    ディベート役割設定
                   </h3>
                   <span className="rounded-full border border-zinc-900/10 bg-zinc-100 px-2.5 py-1 text-[11px] font-mono text-zinc-600">
-                    placeholder
+                    validation active
                   </span>
                 </div>
                 <div className="mt-3 space-y-3">
-                  {DEBATE_ROLE_PLACEHOLDERS.map((role) => (
-                    <div
-                      key={role.label}
-                      className="rounded-2xl border border-zinc-900/10 bg-white px-3 py-3"
+                  {(Object.keys(DEBATE_ROLE_LABELS) as DebateRole[]).map((role) => (
+                    <label
+                      key={role}
+                      className="block rounded-2xl border border-zinc-900/10 bg-white px-3 py-3"
                     >
                       <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
-                        {role.label}
+                        {DEBATE_ROLE_LABELS[role]}
                       </div>
-                      <div className="mt-2 text-sm font-semibold text-zinc-900">
-                        {role.value}
-                      </div>
-                      <div className="mt-1 text-xs leading-5 text-zinc-500">
-                        {role.helper}
-                      </div>
-                    </div>
+                      <select
+                        value={debateAssignments[role]}
+                        onChange={(event) => {
+                          const nextValue = event.target.value as DebateModel | "";
+                          setDebateAssignments((current) => ({
+                            ...current,
+                            [role]: nextValue,
+                          }));
+                          setError(null);
+                        }}
+                        className="mt-2 w-full rounded-xl border border-zinc-900/10 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 outline-none transition focus:border-zinc-900/30 focus:ring-4 focus:ring-zinc-100"
+                      >
+                        <option value="">未選択</option>
+                        {DEBATE_MODELS.map((model) => (
+                          <option key={model.value} value={model.value}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   ))}
+                </div>
+                <div className="mt-4 space-y-2 text-xs leading-6 text-zinc-500">
+                  <p>同じAIを複数役割に割り当てることはできません。</p>
+                  <p>3つすべて選ばれていないとディベートは開始できません。</p>
                 </div>
               </div>
             ) : null}
@@ -521,13 +602,20 @@ export function MeetingWorkspace() {
               <button
                 type="button"
                 onClick={handleRun}
-                disabled={loading}
+                disabled={
+                  loading ||
+                  (mode === "debate" &&
+                    (hasIncompleteDebateAssignments ||
+                      hasDuplicateDebateAssignments))
+                }
                 className="inline-flex items-center justify-center rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
               >
                 {loading ? "会話を更新中..." : "会話を実行 / 統合"}
               </button>
               <p className="text-xs leading-6 text-zinc-500">
-                ブレストとディスカッションでは、ユーザーが「統合して」「整理して」といった明示指示を出した時だけ統合結果を表示します。
+                {mode === "debate"
+                  ? "ディベートでは3役割のAI割当が必須です。今回は割当UIと重複禁止のみを実装しています。"
+                  : "ブレストとディスカッションでは、ユーザーが「統合して」「整理して」といった明示指示を出した時だけ統合結果を表示します。"}
               </p>
             </div>
 
@@ -579,7 +667,26 @@ export function MeetingWorkspace() {
 
             <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
               <h3 className="text-sm font-semibold text-zinc-950">{activePlaceholder.heading}</h3>
-              {hasSynthesis ? (
+              {mode === "debate" ? (
+                <div className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
+                  {(Object.keys(DEBATE_ROLE_LABELS) as DebateRole[]).map((role) => (
+                    <div key={role} className="flex items-start justify-between gap-4 rounded-2xl border border-zinc-900/10 bg-zinc-50 px-3 py-3">
+                      <div>
+                        <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
+                          {DEBATE_ROLE_LABELS[role]}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-zinc-900">
+                          {DEBATE_MODELS.find((item) => item.value === debateAssignments[role])?.label ??
+                            "未選択"}
+                        </div>
+                      </div>
+                      <span className="rounded-full border border-zinc-900/10 bg-white px-2.5 py-1 text-[11px] font-mono text-zinc-500">
+                        {debateAssignments[role] ? "assigned" : "required"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : hasSynthesis ? (
                 <div className="mt-3 space-y-4 text-sm leading-7 text-zinc-700">
                   <div>
                     <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
@@ -631,12 +738,16 @@ export function MeetingWorkspace() {
                 次の実装でつなぐもの
               </h3>
               <p className="mt-3 text-sm leading-7 text-zinc-600">
-                {hasSynthesis
+                {mode === "debate"
+                  ? "次のPRで、審判AIの判定トリガーと判定メッセージ生成を追加します。"
+                  : hasSynthesis
                   ? "今回は明示トリガーで統合メッセージを出せるようになりました。次のPRで trigger 判定の精度や会話履歴前提の整理を広げます。"
                   : activePlaceholder.note}
               </p>
               <div className="mt-4 text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-400">
-                {hasSynthesis
+                {mode === "debate"
+                  ? "debate role assignment ready"
+                  : hasSynthesis
                   ? "explicit synthesis completed"
                   : "waiting for explicit synthesis request"}
               </div>
