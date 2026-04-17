@@ -206,8 +206,6 @@ export function MeetingWorkspace() {
     const isJudgmentRequest = isExplicitJudgmentTrigger(trimmedInput, mode);
 
     if (mode === "debate") {
-      setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
-
       if (hasIncompleteDebateAssignments) {
         setError("ディベートを開始するには、賛成側・反対側・審判をすべて選択してください。");
         return;
@@ -217,6 +215,8 @@ export function MeetingWorkspace() {
         setError("同じAIを複数のディベート役割に割り当てることはできません。");
         return;
       }
+
+      setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
 
       if (isJudgmentRequest) {
         if (lastDiscussionMode !== "debate") {
