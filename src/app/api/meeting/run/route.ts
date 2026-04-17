@@ -1,5 +1,5 @@
-import { runMockMeeting } from "@/lib/orchestrator/mock-orchestrator";
 import type { MeetingMode } from "@/features/meeting/types";
+import { runMeetingWithProvider } from "@/lib/orchestrator/provider-registry";
 
 const VALID_MODES: MeetingMode[] = ["brainstorm", "design_review", "debate"];
 
@@ -19,6 +19,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = await runMockMeeting({ theme, mode });
+  const result = await runMeetingWithProvider(
+    { theme, mode },
+    process.env.MEETING_PROVIDER,
+  );
   return Response.json(result);
 }
