@@ -5,6 +5,14 @@ export type MeetingMessageType =
   | "synthesis"
   | "debate_judgment"
   | "system_status";
+export type ConversationState =
+  | "brainstorming"
+  | "discussing"
+  | "debating"
+  | "awaiting_synthesis"
+  | "awaiting_judgment"
+  | "synthesized"
+  | "judged";
 
 export type SpeakerRole = "vision" | "reality" | "audit";
 
@@ -33,4 +41,11 @@ export interface MeetingRunResult {
 export interface RunMeetingInput {
   theme: string;
   mode: MeetingMode;
+}
+
+export interface ConversationStateSnapshot {
+  mode: MeetingMode;
+  state: ConversationState;
+  label: string;
+  hint: string;
 }
