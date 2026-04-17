@@ -7,6 +7,7 @@ import {
   buildConversationStateSnapshot,
   getAllowedStatesForMode,
   getInitialConversationState,
+  isExplicitSynthesisTrigger,
 } from "@/features/meeting/state";
 import type {
   ConversationState,
@@ -143,15 +144,34 @@ function formatTimestamp(isoTimestamp: string) {
 
 export function MeetingWorkspace() {
   const [theme, setTheme] = useState(DEFAULT_THEME);
+  const [submittedPrompt, setSubmittedPrompt] = useState(DEFAULT_THEME);
   const [mode, setMode] = useState<MeetingMode>("design_review");
   const [conversationState, setConversationState] = useState<ConversationState>(
     getInitialConversationState("design_review"),
   );
   const [result, setResult] = useState<MeetingRunResult>(INITIAL_RESULT);
+  const [lastDiscussionMode, setLastDiscussionMode] =
+    useState<MeetingMode>("design_review");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleRun() {
+    const trimmedInput = theme.trim();
+    const isSynthesisRequest = isExplicitSynthesisTrigger(trimmedInput, mode);
+
+    if (isSynthesisRequest) {
+      setSubmittedPrompt(trimmedInput);
+
+      if (lastDiscussionMode !== mode) {
+        setError("先にこのモードで議論を表示してから統合してください。");
+        return;
+      }
+
+      setError(null);
+      setConversationState("synthesized");
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -169,7 +189,12 @@ export function MeetingWorkspace() {
       }
 
       const nextResult = (await response.json()) as MeetingRunResult;
+      setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
       setResult(nextResult);
+      setLastDiscussionMode(mode);
+      setConversationState(
+        mode === "brainstorm" ? "brainstorming" : "discussing",
+      );
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -187,6 +212,19 @@ export function MeetingWorkspace() {
     buildConversationStateSnapshot(mode, state),
   );
   const activePlaceholder = PANEL_PLACEHOLDERS[mode];
+  const hasSynthesis =
+    mode !== "debate" && conversationState === "synthesized";
+
+  const synthesisBody = [
+    "合意事項",
+    ...result.synthesis.agreements.map((item) => `- ${item}`),
+    "",
+    "未決事項",
+    ...result.synthesis.openQuestions.map((item) => `- ${item}`),
+    "",
+    "推奨案",
+    result.synthesis.recommendation,
+  ].join("\n");
 
   const timelineEntries: TimelineEntry[] = [
     {
@@ -206,7 +244,7 @@ export function MeetingWorkspace() {
       label: "テーマ投稿",
       accentClass: "text-zinc-950",
       markerClass: "bg-zinc-950",
-      body: theme,
+      body: submittedPrompt,
       meta: `mode: ${activeMode.label}`,
       side: "right",
     },
@@ -220,25 +258,44 @@ export function MeetingWorkspace() {
       body: response.content,
       meta: `${ROLE_STYLES[response.role].model} / turn ${index + 1}`,
     })),
-    {
-      id: "synthesis-waiting",
-      messageType: mode === "debate" ? "debate_judgment" : "synthesis",
-      title: mode === "debate" ? "判定待ち" : "統合待ち",
-      label:
-        mode === "debate"
-          ? "ユーザーが判定指示を出すまで保留"
-          : "ユーザーが整理指示を出すまで保留",
-      accentClass: "text-violet-900",
-      markerClass: "bg-violet-500",
-      body:
-        mode === "debate"
-          ? "この位置に最終判定メッセージが入る想定です。今回はレイアウトのみで、勝敗や推奨結論はまだ生成しません。"
-          : "この位置に統合メッセージが入る想定です。今回はレイアウトのみで、要約や推奨案はプレースホルダー表示にしています。",
-      meta:
-        mode === "debate"
-          ? "debate_judgment placeholder"
-          : "synthesis placeholder",
-    },
+    ...(mode === "debate"
+      ? [
+          {
+            id: "synthesis-waiting",
+            messageType: "debate_judgment" as const,
+            title: "判定待ち",
+            label: "ユーザーが判定指示を出すまで保留",
+            accentClass: "text-violet-900",
+            markerClass: "bg-violet-500",
+            body: "この位置に最終判定メッセージが入る想定です。今回はレイアウトのみで、勝敗や推奨結論はまだ生成しません。",
+            meta: "debate_judgment placeholder",
+          },
+        ]
+      : hasSynthesis
+        ? [
+            {
+              id: "synthesis-result",
+              messageType: "synthesis" as const,
+              title: "統合結果",
+              label: "ユーザー明示指示で生成",
+              accentClass: "text-violet-900",
+              markerClass: "bg-violet-500",
+              body: synthesisBody,
+              meta: "synthesis / explicit trigger",
+            },
+          ]
+        : [
+            {
+              id: "synthesis-waiting",
+              messageType: "synthesis" as const,
+              title: "統合待ち",
+              label: "ユーザーが整理指示を出すまで保留",
+              accentClass: "text-violet-900",
+              markerClass: "bg-violet-500",
+              body: "この位置に統合メッセージが入る想定です。ユーザーが明示的に整理を依頼するまで、AI はまだ最終結論を固定しません。",
+              meta: "synthesis placeholder",
+            },
+          ]),
   ];
 
   return (
@@ -393,6 +450,7 @@ export function MeetingWorkspace() {
                       onClick={() => {
                         setMode(option.value);
                         setConversationState(getInitialConversationState(option.value));
+                        setError(null);
                       }}
                       className={`rounded-2xl border px-4 py-3 text-left transition ${
                         active
@@ -466,10 +524,10 @@ export function MeetingWorkspace() {
                 disabled={loading}
                 className="inline-flex items-center justify-center rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
               >
-                {loading ? "会話を更新中..." : "会話を表示更新"}
+                {loading ? "会話を更新中..." : "会話を実行 / 統合"}
               </button>
               <p className="text-xs leading-6 text-zinc-500">
-                今回のPRでは表示構造のみを整えています。統合・判定ロジックや会話状態遷移は次のPRで実装します。
+                ブレストとディスカッションでは、ユーザーが「統合して」「整理して」といった明示指示を出した時だけ統合結果を表示します。
               </p>
             </div>
 
@@ -520,17 +578,52 @@ export function MeetingWorkspace() {
             </div>
 
             <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
-              <h3 className="text-sm font-semibold text-zinc-950">
-                {activePlaceholder.heading}
-              </h3>
-              <ul className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
-                {activePlaceholder.items.map((item) => (
-                  <li key={item} className="flex gap-3">
-                    <span className="mt-2 h-2 w-2 rounded-full bg-zinc-400" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
+              <h3 className="text-sm font-semibold text-zinc-950">{activePlaceholder.heading}</h3>
+              {hasSynthesis ? (
+                <div className="mt-3 space-y-4 text-sm leading-7 text-zinc-700">
+                  <div>
+                    <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
+                      合意事項
+                    </div>
+                    <ul className="mt-2 space-y-2">
+                      {result.synthesis.agreements.map((item) => (
+                        <li key={item} className="flex gap-3">
+                          <span className="mt-2 h-2 w-2 rounded-full bg-orange-500" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
+                      未決事項
+                    </div>
+                    <ul className="mt-2 space-y-2">
+                      {result.synthesis.openQuestions.map((item) => (
+                        <li key={item} className="flex gap-3">
+                          <span className="mt-2 h-2 w-2 rounded-full bg-sky-500" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
+                      推奨案
+                    </div>
+                    <p className="mt-2">{result.synthesis.recommendation}</p>
+                  </div>
+                </div>
+              ) : (
+                <ul className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
+                  {activePlaceholder.items.map((item) => (
+                    <li key={item} className="flex gap-3">
+                      <span className="mt-2 h-2 w-2 rounded-full bg-zinc-400" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div className="rounded-[1.5rem] border border-dashed border-zinc-300 bg-zinc-50/80 p-4">
@@ -538,10 +631,14 @@ export function MeetingWorkspace() {
                 次の実装でつなぐもの
               </h3>
               <p className="mt-3 text-sm leading-7 text-zinc-600">
-                {activePlaceholder.note}
+                {hasSynthesis
+                  ? "今回は明示トリガーで統合メッセージを出せるようになりました。次のPRで trigger 判定の精度や会話履歴前提の整理を広げます。"
+                  : activePlaceholder.note}
               </p>
               <div className="mt-4 text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-400">
-                placeholder only / no real synthesis
+                {hasSynthesis
+                  ? "explicit synthesis completed"
+                  : "waiting for explicit synthesis request"}
               </div>
             </div>
 
