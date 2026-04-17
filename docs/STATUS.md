@@ -104,7 +104,7 @@ attachment 機能は、MVP としてはかなり成立しています。
 
 現状ドキュメント上で、まだ未実装 / スコープ外にあるものは以下。
 
-- 実 provider SDK 接続（OpenAI / Anthropic / Google / ローカル LLM）
+- 実 provider SDK 接続（OpenAI / Google / ローカル LLM）※ Anthropic は接続済み
 - DB 永続化
 - 履歴 sidebar / session restore UI
 - 本格 RAG
@@ -156,7 +156,6 @@ AWS 本番デプロイや DB 永続化はそのあと。
 
 1. `debateJudgment` の optional 化
 2. `INITIAL_RESULT` 重複整理
-3. 実 provider 1 本接続
-4. その後に Prompt Settings 検討
+3. Prompt Settings 検討
 
 つまり、次は新機能を増やすより境界整理に戻るターン。
