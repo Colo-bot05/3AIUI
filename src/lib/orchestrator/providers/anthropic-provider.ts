@@ -193,6 +193,7 @@ async function produceContinueTurn(
   const effectiveRolePrompts = input.rolePrompts ?? DEFAULT_ROLE_PROMPTS;
   const speakerMeta = ROLE_META[input.nextSpeaker];
   const speakerPrompt = effectiveRolePrompts[input.nextSpeaker];
+  const hasAttachments = (input.attachments ?? []).length > 0;
 
   const system = [
     `あなたは 3 人の AI が同席する会議の ${input.nextSpeaker} (${speakerMeta.label}) として発言します。`,
@@ -202,7 +203,12 @@ async function produceContinueTurn(
     "このターンでは自分 (この役) の発言だけを返してください。他の役の発言を代わりに書いてはいけません。",
     "必ず produce_turn ツールで発言内容を返すこと。平文で返答してはいけません。",
     "これまでの会話履歴を踏まえ、自分の立場・視点から 2〜3 段落で話すこと。",
-  ].join("\n");
+    hasAttachments
+      ? "前提資料（添付ファイル）が提供されている場合、その具体的な記述・数値・用語を少なくとも 1 箇所は引用または参照して発言に活かすこと。資料に書かれていない推測は避け、書かれている内容を起点に話すこと。"
+      : "",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 
   const user = [
     `テーマ: ${normalizedTheme}`,
@@ -212,6 +218,9 @@ async function produceContinueTurn(
     buildHistoryText(input.history),
     "",
     `あなたは次の発言者 (${input.nextSpeaker} / ${speakerMeta.label}) です。あなた自身の発言だけを書いてください。`,
+    hasAttachments
+      ? "上に列挙された前提資料を必ず参照し、その内容に触れる形で発言を組み立ててください。"
+      : "",
   ]
     .filter((line) => line !== "")
     .join("\n");
@@ -247,6 +256,7 @@ async function produceSynthesis(
     input.theme.trim() || "ローカルLLM構築を加速する3AI会議UI";
   const effectiveRolePrompts = input.rolePrompts ?? DEFAULT_ROLE_PROMPTS;
   const auditMeta = ROLE_META.audit;
+  const hasAttachments = (input.attachments ?? []).length > 0;
 
   const system = [
     `あなたは audit (${auditMeta.label}) として会議履歴を統合・要約します。`,
@@ -254,7 +264,12 @@ async function produceSynthesis(
     `モード: ${input.mode} — ${MODE_GUIDANCE[input.mode]}`,
     "",
     "必ず produce_synthesis ツールで構造化した結果を返すこと。平文で返答してはいけません。",
-  ].join("\n");
+    hasAttachments
+      ? "前提資料（添付ファイル）がある場合、その記述を根拠として合意事項・未決事項・推奨案に織り込むこと。"
+      : "",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 
   const user = [
     `テーマ: ${normalizedTheme}`,
@@ -304,6 +319,8 @@ async function produceJudgment(
       ]
     : [];
 
+  const hasAttachments = (input.attachments ?? []).length > 0;
+
   const system = [
     `あなたは audit / 審判 (${auditMeta.label}) としてディベートを判定します。`,
     `あなたの人格: ${effectiveRolePrompts.audit}`,
@@ -311,7 +328,12 @@ async function produceJudgment(
     "",
     "必ず produce_judgment ツールで構造化した判定結果を返すこと。平文で返答してはいけません。",
     "判定詳細には審判ラベルを含めず、「現時点では〜が妥当です。」の中立表現で返すこと。",
-  ].join("\n");
+    hasAttachments
+      ? "前提資料（添付ファイル）がある場合、その記述を判定理由や残論点に織り込むこと。"
+      : "",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 
   const user = [
     `テーマ: ${normalizedTheme}`,
