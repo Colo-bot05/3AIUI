@@ -56,7 +56,7 @@ export interface ControlSidebarProps {
   activePlaceholder: ActivePlaceholder;
   hasSynthesis: boolean;
   hasJudgment: boolean;
-  synthesisDisplay: SynthesisDisplay;
+  synthesisDisplay: SynthesisDisplay | null;
   debateJudgmentDisplay: DebateJudgmentDisplay | null;
   debateAssignmentLabels: DebateAssignmentLabels;
   result: MeetingRunResult;
@@ -368,7 +368,7 @@ export function ControlSidebar({
                   </div>
                 ))}
               </div>
-            ) : hasSynthesis ? (
+            ) : hasSynthesis && result.synthesis && synthesisDisplay ? (
               <div className="mt-3 space-y-3">
                 <div className="grid grid-cols-3 gap-2">
                   <div className="rounded-2xl border border-orange-200 bg-orange-50/80 px-3 py-3">

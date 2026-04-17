@@ -2,15 +2,18 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import { DEFAULT_ROLE_PROMPTS } from "@/features/meeting/default-prompts";
 import type {
-  DebateJudgmentResult,
+  ContinueActionInput,
+  ContinueActionResult,
+  JudgeActionInput,
+  JudgeActionResult,
+  MeetingActionInput,
+  MeetingActionResult,
   MeetingAttachment,
   MeetingMode,
-  MeetingRunResult,
   RoleResponse,
-  RolePrompts,
-  RunMeetingInput,
   SpeakerRole,
-  SynthesisResult,
+  SynthesizeActionInput,
+  SynthesizeActionResult,
 } from "@/features/meeting/types";
 import type { MeetingProviderAdapter } from "@/lib/orchestrator/provider-adapter";
 
@@ -38,109 +41,94 @@ const MODE_GUIDANCE: Record<MeetingMode, string> = {
   design_review:
     "ディスカッションモード。責務分離と将来差し替えやすさを軸に、論点を順番に深掘りする。",
   debate:
-    "ディベートモード。賛否を分けて意思決定の材料を見える化する。最後に審判役が判定を返す。",
+    "ディベートモード。構想側・現実側が対立視点で論じ、audit が判定を担当する。",
 };
 
 const MODEL = "claude-sonnet-4-5";
 const MAX_TOKENS = 4096;
 const MAX_ATTACHMENT_CHARS_PER_FILE = 4000;
 
-const meetingResultTool: Anthropic.Tool = {
-  name: "produce_meeting_result",
+const turnTool: Anthropic.Tool = {
+  name: "produce_turn",
   description:
-    "3人のAI（構想AI / 現実AI / 監査AI）による会議の結果を、構造化した形で返すためのツール。必ずこのツールで回答すること。",
+    "次の発言者として、1 人分の発言 content を 1 本だけ返す。必ずこのツールで回答すること。",
   input_schema: {
     type: "object",
     properties: {
-      responses: {
-        type: "array",
+      content: {
+        type: "string",
         description:
-          "3人のAIそれぞれの発言。必ず vision / reality / audit の3つを含めること。",
-        items: {
-          type: "object",
-          properties: {
-            role: {
-              type: "string",
-              enum: ["vision", "reality", "audit"],
-            },
-            content: {
-              type: "string",
-              description:
-                "そのロールの発言本文。日本語で、2〜3段落。段落区切りは \\n\\n。",
-            },
-          },
-          required: ["role", "content"],
-        },
-      },
-      synthesis: {
-        type: "object",
-        properties: {
-          agreements: {
-            type: "array",
-            items: { type: "string" },
-            description: "3人が合意できる前提・事実を3〜5項目。",
-          },
-          openQuestions: {
-            type: "array",
-            items: { type: "string" },
-            description: "未決事項・確認が必要な論点を2〜4項目。",
-          },
-          recommendation: {
-            type: "string",
-            description: "現時点で最も妥当な推奨案を1パラグラフで。",
-          },
-        },
-        required: ["agreements", "openQuestions", "recommendation"],
-      },
-      debateJudgment: {
-        type: "object",
-        description:
-          "debateモード時のみ出力。それ以外のモードでは省略すること。",
-        properties: {
-          verdictHeadline: {
-            type: "string",
-            description: "判定の1行見出し（例: 追加検証付きで賛成側案を前進）",
-          },
-          verdictDetail: {
-            type: "string",
-            description:
-              "判定の詳細。審判役のラベルは含めず、「現時点では〜が妥当です。」の形で中立的に。",
-          },
-          reasoning: {
-            type: "string",
-            description: "判定に至った理由を1パラグラフで。",
-          },
-          proLeadPoint: {
-            type: "string",
-            description: "賛成側の主要な主張の1行要約（ラベルは含めない）。",
-          },
-          conLeadPoint: {
-            type: "string",
-            description: "反対側の主要な主張の1行要約（ラベルは含めない）。",
-          },
-          openPoints: {
-            type: "array",
-            items: { type: "string" },
-            description: "残る論点を2〜4項目。",
-          },
-          nextSteps: {
-            type: "array",
-            items: { type: "string" },
-            description: "次に確認すべきアクションを2〜3項目。",
-          },
-        },
-        required: [
-          "verdictHeadline",
-          "verdictDetail",
-          "reasoning",
-          "proLeadPoint",
-          "conLeadPoint",
-          "openPoints",
-          "nextSteps",
-        ],
+          "発言本文。日本語で 2〜3 段落。段落区切りは \\n\\n。前の発言者の主張を踏まえて自分の立場から話すこと。",
       },
     },
-    required: ["responses", "synthesis"],
+    required: ["content"],
+  },
+};
+
+const synthesisTool: Anthropic.Tool = {
+  name: "produce_synthesis",
+  description: "audit 役として会議履歴を統合する。必ずこのツールで回答すること。",
+  input_schema: {
+    type: "object",
+    properties: {
+      agreements: {
+        type: "array",
+        items: { type: "string" },
+        description: "合意事項を3〜5項目。",
+      },
+      openQuestions: {
+        type: "array",
+        items: { type: "string" },
+        description: "未決事項・確認が必要な論点を2〜4項目。",
+      },
+      recommendation: {
+        type: "string",
+        description: "推奨案を1パラグラフで。",
+      },
+    },
+    required: ["agreements", "openQuestions", "recommendation"],
+  },
+};
+
+const judgmentTool: Anthropic.Tool = {
+  name: "produce_judgment",
+  description: "audit 役としてディベートを判定する。必ずこのツールで回答すること。",
+  input_schema: {
+    type: "object",
+    properties: {
+      verdictHeadline: { type: "string" },
+      verdictDetail: {
+        type: "string",
+        description:
+          "判定詳細。審判ラベルは含めず、「現時点では〜が妥当です。」の形で中立に。",
+      },
+      reasoning: { type: "string" },
+      proLeadPoint: {
+        type: "string",
+        description: "構想側（賛成側）の要点の1行要約。ラベルは含めない。",
+      },
+      conLeadPoint: {
+        type: "string",
+        description: "現実側（反対側）の要点の1行要約。ラベルは含めない。",
+      },
+      openPoints: {
+        type: "array",
+        items: { type: "string" },
+      },
+      nextSteps: {
+        type: "array",
+        items: { type: "string" },
+      },
+    },
+    required: [
+      "verdictHeadline",
+      "verdictDetail",
+      "reasoning",
+      "proLeadPoint",
+      "conLeadPoint",
+      "openPoints",
+      "nextSteps",
+    ],
   },
 };
 
@@ -152,25 +140,6 @@ function createClient() {
     );
   }
   return new Anthropic({ apiKey });
-}
-
-function buildSystemPrompt(mode: MeetingMode, rolePrompts: RolePrompts): string {
-  const lines = [
-    "あなたは 3 人の AI が同席する会議の進行役です。",
-    "3 人の役割は次のとおり。",
-    `- vision (${ROLE_META.vision.label}): ${rolePrompts.vision}`,
-    `- reality (${ROLE_META.reality.label}): ${rolePrompts.reality}`,
-    `- audit (${ROLE_META.audit.label}): ${rolePrompts.audit}`,
-    "",
-    `現在のモード: ${mode} — ${MODE_GUIDANCE[mode]}`,
-    "",
-    "必ず produce_meeting_result ツールを使って構造化された回答を返してください。平文で返答してはいけません。",
-    "各ロールの発言は日本語で、具体性を持って書くこと。`content` は段落を \\n\\n で区切ること。",
-    mode === "debate"
-      ? "debate モードでは debateJudgment も必ず埋めること。"
-      : "debate モード以外では debateJudgment を省略すること。",
-  ];
-  return lines.join("\n");
 }
 
 function buildAttachmentSection(attachments: MeetingAttachment[]): string {
@@ -188,94 +157,207 @@ function buildAttachmentSection(attachments: MeetingAttachment[]): string {
   return ["", "前提資料:", "", ...blocks].join("\n");
 }
 
-function buildUserPrompt(theme: string, attachments: MeetingAttachment[]): string {
-  const attachmentSection = buildAttachmentSection(attachments);
-  return [
-    `テーマ: ${theme}`,
-    attachmentSection,
+function buildHistoryText(history: RoleResponse[]): string {
+  if (history.length === 0) {
+    return "（まだ発言なし）";
+  }
+  return history
+    .map(
+      (entry, index) =>
+        `ターン${index + 1}・${ROLE_META[entry.role].label} (${entry.role}):\n${entry.content}`,
+    )
+    .join("\n\n---\n\n");
+}
+
+function extractToolInput<T>(
+  message: Anthropic.Message,
+  toolName: string,
+): T {
+  const toolBlock = message.content.find(
+    (block) => block.type === "tool_use" && block.name === toolName,
+  );
+  if (!toolBlock || toolBlock.type !== "tool_use") {
+    throw new Error(
+      `Anthropic response missing expected tool_use block for ${toolName}.`,
+    );
+  }
+  return toolBlock.input as T;
+}
+
+async function produceContinueTurn(
+  input: ContinueActionInput,
+): Promise<ContinueActionResult> {
+  const client = createClient();
+  const normalizedTheme =
+    input.theme.trim() || "ローカルLLM構築を加速する3AI会議UI";
+  const effectiveRolePrompts = input.rolePrompts ?? DEFAULT_ROLE_PROMPTS;
+  const speakerMeta = ROLE_META[input.nextSpeaker];
+  const speakerPrompt = effectiveRolePrompts[input.nextSpeaker];
+
+  const system = [
+    `あなたは 3 人の AI が同席する会議の ${input.nextSpeaker} (${speakerMeta.label}) として発言します。`,
+    `あなたの人格: ${speakerPrompt}`,
+    `モード: ${input.mode} — ${MODE_GUIDANCE[input.mode]}`,
     "",
-    "このテーマについて、3 人の AI それぞれの観点で発言してください。その後、synthesis（合意事項・未決事項・推奨案）を必ずまとめてください。",
+    "このターンでは自分 (この役) の発言だけを返してください。他の役の発言を代わりに書いてはいけません。",
+    "必ず produce_turn ツールで発言内容を返すこと。平文で返答してはいけません。",
+    "これまでの会話履歴を踏まえ、自分の立場・視点から 2〜3 段落で話すこと。",
+  ].join("\n");
+
+  const user = [
+    `テーマ: ${normalizedTheme}`,
+    buildAttachmentSection(input.attachments ?? []),
+    "",
+    "これまでの会話:",
+    buildHistoryText(input.history),
+    "",
+    `あなたは次の発言者 (${input.nextSpeaker} / ${speakerMeta.label}) です。あなた自身の発言だけを書いてください。`,
   ]
     .filter((line) => line !== "")
     .join("\n");
-}
-
-interface ToolInputShape {
-  responses: Array<{ role: SpeakerRole; content: string }>;
-  synthesis: SynthesisResult;
-  debateJudgment?: DebateJudgmentResult;
-}
-
-function extractToolInput(response: Anthropic.Message): ToolInputShape {
-  const toolBlock = response.content.find((block) => block.type === "tool_use");
-  if (!toolBlock || toolBlock.type !== "tool_use") {
-    throw new Error(
-      "Anthropic response did not include the expected tool_use block.",
-    );
-  }
-  return toolBlock.input as ToolInputShape;
-}
-
-function mapResponses(
-  toolResponses: ToolInputShape["responses"],
-): RoleResponse[] {
-  const byRole = new Map(toolResponses.map((item) => [item.role, item]));
-  return (["vision", "reality", "audit"] as SpeakerRole[]).map((role) => {
-    const meta = ROLE_META[role];
-    const produced = byRole.get(role);
-    return {
-      role,
-      label: meta.label,
-      viewpoint: meta.viewpoint,
-      emphasis: meta.emphasis,
-      content: produced?.content ?? "",
-    };
-  });
-}
-
-async function runAnthropicMeeting({
-  theme,
-  mode,
-  attachments = [],
-  rolePrompts,
-}: RunMeetingInput): Promise<MeetingRunResult> {
-  const client = createClient();
-  const normalizedTheme = theme.trim() || "ローカルLLM構築を加速する3AI会議UI";
-  const effectiveRolePrompts = rolePrompts ?? DEFAULT_ROLE_PROMPTS;
 
   const message = await client.messages.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
-    system: buildSystemPrompt(mode, effectiveRolePrompts),
-    tools: [meetingResultTool],
-    tool_choice: { type: "tool", name: "produce_meeting_result" },
-    messages: [
-      {
-        role: "user",
-        content: buildUserPrompt(normalizedTheme, attachments),
-      },
-    ],
+    system,
+    tools: [turnTool],
+    tool_choice: { type: "tool", name: "produce_turn" },
+    messages: [{ role: "user", content: user }],
   });
 
-  const toolInput = extractToolInput(message);
-  const responses = mapResponses(toolInput.responses);
+  const { content } = extractToolInput<{ content: string }>(message, "produce_turn");
 
-  const result: MeetingRunResult = {
-    theme: normalizedTheme,
-    mode,
-    responses,
-    synthesis: toolInput.synthesis,
-    generatedAt: new Date().toISOString(),
+  return {
+    action: "continue",
+    turn: {
+      role: input.nextSpeaker,
+      label: speakerMeta.label,
+      viewpoint: speakerMeta.viewpoint,
+      emphasis: speakerMeta.emphasis,
+      content,
+    },
   };
+}
 
-  if (mode === "debate" && toolInput.debateJudgment) {
-    result.debateJudgment = toolInput.debateJudgment;
+async function produceSynthesis(
+  input: SynthesizeActionInput,
+): Promise<SynthesizeActionResult> {
+  const client = createClient();
+  const normalizedTheme =
+    input.theme.trim() || "ローカルLLM構築を加速する3AI会議UI";
+  const effectiveRolePrompts = input.rolePrompts ?? DEFAULT_ROLE_PROMPTS;
+  const auditMeta = ROLE_META.audit;
+
+  const system = [
+    `あなたは audit (${auditMeta.label}) として会議履歴を統合・要約します。`,
+    `あなたの人格: ${effectiveRolePrompts.audit}`,
+    `モード: ${input.mode} — ${MODE_GUIDANCE[input.mode]}`,
+    "",
+    "必ず produce_synthesis ツールで構造化した結果を返すこと。平文で返答してはいけません。",
+  ].join("\n");
+
+  const user = [
+    `テーマ: ${normalizedTheme}`,
+    buildAttachmentSection(input.attachments ?? []),
+    "",
+    "これまでの会話:",
+    buildHistoryText(input.history),
+    "",
+    "これまでの 2 役の発言を読み、合意事項・未決事項・推奨案を整理してください。",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+
+  const message = await client.messages.create({
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system,
+    tools: [synthesisTool],
+    tool_choice: { type: "tool", name: "produce_synthesis" },
+    messages: [{ role: "user", content: user }],
+  });
+
+  const synthesis = extractToolInput<SynthesizeActionResult["synthesis"]>(
+    message,
+    "produce_synthesis",
+  );
+
+  return { action: "synthesize", synthesis };
+}
+
+async function produceJudgment(
+  input: JudgeActionInput,
+): Promise<JudgeActionResult> {
+  const client = createClient();
+  const normalizedTheme =
+    input.theme.trim() || "ローカルLLM構築を加速する3AI会議UI";
+  const effectiveRolePrompts = input.rolePrompts ?? DEFAULT_ROLE_PROMPTS;
+  const auditMeta = ROLE_META.audit;
+  const labels = input.debateAssignmentLabels;
+
+  const labelLines = labels
+    ? [
+        "役割割当 (参考):",
+        `- 構想側 (pro): ${labels.pro}`,
+        `- 現実側 (con): ${labels.con}`,
+        `- 審判 (judge): ${labels.judge}`,
+      ]
+    : [];
+
+  const system = [
+    `あなたは audit / 審判 (${auditMeta.label}) としてディベートを判定します。`,
+    `あなたの人格: ${effectiveRolePrompts.audit}`,
+    `モード: ${input.mode} — ${MODE_GUIDANCE[input.mode]}`,
+    "",
+    "必ず produce_judgment ツールで構造化した判定結果を返すこと。平文で返答してはいけません。",
+    "判定詳細には審判ラベルを含めず、「現時点では〜が妥当です。」の中立表現で返すこと。",
+  ].join("\n");
+
+  const user = [
+    `テーマ: ${normalizedTheme}`,
+    buildAttachmentSection(input.attachments ?? []),
+    "",
+    "これまでのディベート:",
+    buildHistoryText(input.history),
+    "",
+    ...labelLines,
+    "",
+    "構想側 / 現実側の要点を 1 行ずつ要約し、総合判定と理由、残論点、次に確認すべきステップを出してください。",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+
+  const message = await client.messages.create({
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system,
+    tools: [judgmentTool],
+    tool_choice: { type: "tool", name: "produce_judgment" },
+    messages: [{ role: "user", content: user }],
+  });
+
+  const debateJudgment = extractToolInput<JudgeActionResult["debateJudgment"]>(
+    message,
+    "produce_judgment",
+  );
+
+  return { action: "judge", debateJudgment };
+}
+
+async function performAction(
+  input: MeetingActionInput,
+): Promise<MeetingActionResult> {
+  switch (input.action) {
+    case "continue":
+      return produceContinueTurn(input);
+    case "synthesize":
+      return produceSynthesis(input);
+    case "judge":
+      return produceJudgment(input);
   }
-
-  return result;
 }
 
 export const anthropicMeetingProvider: MeetingProviderAdapter = {
   name: "anthropic",
-  runMeeting: runAnthropicMeeting,
+  performAction,
 };

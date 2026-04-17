@@ -14,8 +14,6 @@ import {
   buildConversationStateSnapshot,
   getAllowedStatesForMode,
   getInitialConversationState,
-  isExplicitJudgmentTrigger,
-  isExplicitSynthesisTrigger,
 } from "@/features/meeting/state";
 import type {
   ConversationState,
@@ -23,14 +21,32 @@ import type {
   DebateRole,
   DebateRoleAssignments,
   MeetingAttachment,
+  MeetingActionInput,
+  MeetingActionResult,
   MeetingMode,
   MeetingRunResult,
   RolePrompts,
+  SpeakerRole,
 } from "@/features/meeting/types";
 import { inMemorySessionRepository } from "@/lib/session/in-memory-session-repository";
 
 import { ControlSidebar } from "./meeting-workspace/control-sidebar";
 import { PromptSettingsPanel } from "./meeting-workspace/prompt-settings-panel";
+import {
+  DEBATE_ROLE_LABELS,
+  DEFAULT_THEME,
+  INITIAL_DEBATE_ASSIGNMENTS,
+  INITIAL_RESULT,
+  PANEL_PLACEHOLDERS,
+  buildFallbackAttachmentErrorItem,
+  buildSessionAttachmentContext,
+  buildTimelineEntries,
+  parseSelectedAttachmentFile,
+  pickActionLabels,
+  pickModelLabel,
+  type WorkspaceAction,
+} from "./meeting-workspace/shared";
+import { TimelinePanel } from "./meeting-workspace/timeline-panel";
 
 const PROMPT_STORAGE_KEY = "meeting-workspace-role-prompts";
 
@@ -69,21 +85,15 @@ function areRolePromptsEqual(left: RolePrompts, right: RolePrompts) {
     left.audit === right.audit
   );
 }
-import {
-  DEBATE_ROLE_LABELS,
-  DEFAULT_THEME,
-  INITIAL_DEBATE_ASSIGNMENTS,
-  INITIAL_RESULT,
-  PANEL_PLACEHOLDERS,
-  buildFallbackAttachmentErrorItem,
-  buildSessionAttachmentContext,
-  buildTimelineEntries,
-  parseSelectedAttachmentFile,
-  pickActionLabels,
-  pickModelLabel,
-  type WorkspaceAction,
-} from "./meeting-workspace/shared";
-import { TimelinePanel } from "./meeting-workspace/timeline-panel";
+
+function pickNextSpeaker(
+  history: MeetingRunResult["responses"],
+): Exclude<SpeakerRole, "audit"> {
+  const spoken = history.filter(
+    (entry) => entry.role === "vision" || entry.role === "reality",
+  );
+  return spoken.length % 2 === 0 ? "vision" : "reality";
+}
 
 export function MeetingWorkspace() {
   const [theme, setTheme] = useState(DEFAULT_THEME);
@@ -150,6 +160,17 @@ export function MeetingWorkspace() {
   const readyAttachments = attachments.filter(
     (attachment) => attachment.status === "ready",
   );
+  const readyAttachmentsForApi = readyAttachments.map<MeetingAttachment>(
+    (attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      extension: attachment.extension,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+      extractedText: attachment.extractedText,
+      excerpt: attachment.excerpt,
+    }),
+  );
 
   async function handleAttachmentSelection(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
@@ -168,10 +189,7 @@ export function MeetingWorkspace() {
         : buildFallbackAttachmentErrorItem(selectedFiles[index]),
     );
 
-    setAttachments((current) => [
-      ...current,
-      ...nextAttachments,
-    ]);
+    setAttachments((current) => [...current, ...nextAttachments]);
     const sessionId = await ensureSessionId();
     for (const attachment of nextAttachments) {
       await inMemorySessionRepository.appendEntry({
@@ -209,6 +227,20 @@ export function MeetingWorkspace() {
     });
   }
 
+  async function postMeetingAction(
+    payload: MeetingActionInput,
+  ): Promise<MeetingActionResult> {
+    const response = await fetch("/api/meeting/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error("会議の生成に失敗しました。");
+    }
+    return (await response.json()) as MeetingActionResult;
+  }
+
   async function handleRun(action: WorkspaceAction) {
     const freshRolePrompts = loadRolePromptsFromStorage() ?? rolePrompts;
     if (!areRolePromptsEqual(freshRolePrompts, rolePrompts)) {
@@ -216,98 +248,141 @@ export function MeetingWorkspace() {
     }
 
     const trimmedInput = theme.trim();
+    const normalizedPrompt = trimmedInput || DEFAULT_THEME;
     const isFinalizeAction = action === "finalize";
-    const isSynthesisRequest =
-      mode !== "debate" &&
-      (isFinalizeAction || isExplicitSynthesisTrigger(trimmedInput, mode));
-    const isJudgmentRequest =
-      mode === "debate" &&
-      (isFinalizeAction || isExplicitJudgmentTrigger(trimmedInput, mode));
 
     if (mode === "debate") {
       if (hasIncompleteDebateAssignments) {
         setError("ディベートを開始するには、賛成側・反対側・審判をすべて選択してください。");
         return;
       }
-
       if (hasDuplicateDebateAssignments) {
         setError("同じAIを複数のディベート役割に割り当てることはできません。");
         return;
       }
-
-      if (isJudgmentRequest) {
-        if (lastDiscussionMode !== "debate") {
-          setError("先にディベートを開始してから判定してください。");
-          return;
-        }
-
-        setError(null);
-        setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
-        setConversationState("judged");
-        await inMemorySessionRepository.appendEntry({
-          sessionId: await ensureSessionId(),
-          type: "judgment_requested",
-          mode,
-          prompt: trimmedInput || DEFAULT_THEME,
-          conversationState: "judged",
-        });
-        return;
-      }
     }
 
-    if (isSynthesisRequest) {
+    if (isFinalizeAction) {
+      if (result.responses.length === 0) {
+        setError(
+          mode === "debate"
+            ? "先にディベートを開始してから判定してください。"
+            : "先にこのモードで議論を表示してから統合してください。",
+        );
+        return;
+      }
       if (lastDiscussionMode !== mode) {
-        setError("先にこのモードで議論を表示してから統合してください。");
+        setError(
+          mode === "debate"
+            ? "先にディベートを開始してから判定してください。"
+            : "先にこのモードで議論を表示してから統合してください。",
+        );
         return;
       }
 
+      setLoading(true);
       setError(null);
-      setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
-      setConversationState("synthesized");
-      await inMemorySessionRepository.appendEntry({
-        sessionId: await ensureSessionId(),
-        type: "synthesis_requested",
-        mode,
-        prompt: trimmedInput,
-        conversationState: "synthesized",
-      });
+      try {
+        if (mode === "debate") {
+          const payload: MeetingActionInput = {
+            action: "judge",
+            theme,
+            mode,
+            attachments: readyAttachmentsForApi,
+            rolePrompts: freshRolePrompts,
+            history: result.responses,
+            debateAssignmentLabels: {
+              pro: pickModelLabel(debateAssignments.pro),
+              con: pickModelLabel(debateAssignments.con),
+              judge: pickModelLabel(debateAssignments.judge),
+            },
+          };
+          const response = await postMeetingAction(payload);
+          if (response.action !== "judge") {
+            throw new Error("Unexpected response shape for judge action.");
+          }
+          setSubmittedPrompt(normalizedPrompt);
+          setResult((prev) => ({
+            ...prev,
+            debateJudgment: response.debateJudgment,
+            generatedAt: new Date().toISOString(),
+          }));
+          setConversationState("judged");
+          await inMemorySessionRepository.appendEntry({
+            sessionId: await ensureSessionId(),
+            type: "judgment_requested",
+            mode,
+            prompt: normalizedPrompt,
+            conversationState: "judged",
+          });
+        } else {
+          const payload: MeetingActionInput = {
+            action: "synthesize",
+            theme,
+            mode,
+            attachments: readyAttachmentsForApi,
+            rolePrompts: freshRolePrompts,
+            history: result.responses,
+          };
+          const response = await postMeetingAction(payload);
+          if (response.action !== "synthesize") {
+            throw new Error("Unexpected response shape for synthesize action.");
+          }
+          setSubmittedPrompt(normalizedPrompt);
+          setResult((prev) => ({
+            ...prev,
+            synthesis: response.synthesis,
+            generatedAt: new Date().toISOString(),
+          }));
+          setConversationState("synthesized");
+          await inMemorySessionRepository.appendEntry({
+            sessionId: await ensureSessionId(),
+            type: "synthesis_requested",
+            mode,
+            prompt: trimmedInput,
+            conversationState: "synthesized",
+          });
+        }
+      } catch (nextError) {
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "不明なエラーが発生しました。",
+        );
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 
+    // action === "continue"
+    const nextSpeaker = pickNextSpeaker(result.responses);
     setLoading(true);
     setError(null);
-
     try {
-      const response = await fetch("/api/meeting/run", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          theme,
-          mode,
-          attachments: readyAttachments.map<MeetingAttachment>((attachment) => ({
-            id: attachment.id,
-            filename: attachment.filename,
-            extension: attachment.extension,
-            mimeType: attachment.mimeType,
-            size: attachment.size,
-            extractedText: attachment.extractedText,
-            excerpt: attachment.excerpt,
-          })),
-          rolePrompts: freshRolePrompts,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("会議の生成に失敗しました。");
+      const payload: MeetingActionInput = {
+        action: "continue",
+        theme,
+        mode,
+        attachments: readyAttachmentsForApi,
+        rolePrompts: freshRolePrompts,
+        history: result.responses,
+        nextSpeaker,
+      };
+      const response = await postMeetingAction(payload);
+      if (response.action !== "continue") {
+        throw new Error("Unexpected response shape for continue action.");
       }
-
-      const nextResult = (await response.json()) as MeetingRunResult;
-      setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
-      setResult(nextResult);
+      setSubmittedPrompt(normalizedPrompt);
+      setResult((prev) => ({
+        ...prev,
+        theme: normalizedPrompt,
+        mode,
+        responses: [...prev.responses, response.turn],
+        generatedAt: new Date().toISOString(),
+      }));
       setLastDiscussionMode(mode);
-      const nextConversationState =
+      const nextConversationState: ConversationState =
         mode === "brainstorm"
           ? "brainstorming"
           : mode === "debate"
@@ -318,7 +393,7 @@ export function MeetingWorkspace() {
         sessionId: await ensureSessionId(),
         type: "meeting_generated",
         mode,
-        prompt: trimmedInput || DEFAULT_THEME,
+        prompt: normalizedPrompt,
         conversationState: nextConversationState,
         attachmentContext: buildSessionAttachmentContext(readyAttachments),
       });
@@ -336,6 +411,12 @@ export function MeetingWorkspace() {
   function handleModeChange(nextMode: MeetingMode) {
     setMode(nextMode);
     setConversationState(getInitialConversationState(nextMode));
+    setResult((prev) => ({
+      theme: prev.theme,
+      mode: nextMode,
+      responses: [],
+      generatedAt: new Date().toISOString(),
+    }));
     setError(null);
   }
 
@@ -365,6 +446,7 @@ export function MeetingWorkspace() {
       (!hasIncompleteDebateAssignments && !hasDuplicateDebateAssignments));
   const canFinalizeDiscussion =
     !loading &&
+    result.responses.length > 0 &&
     lastDiscussionMode === mode &&
     (mode !== "debate" ||
       (!hasIncompleteDebateAssignments && !hasDuplicateDebateAssignments));
@@ -383,11 +465,20 @@ export function MeetingWorkspace() {
     con: pickModelLabel(debateAssignments.con),
     judge: pickModelLabel(debateAssignments.judge),
   };
-  const synthesisDisplay = buildSynthesisDisplay(result.synthesis);
+  const synthesisDisplay = result.synthesis
+    ? buildSynthesisDisplay(result.synthesis)
+    : null;
   const debateJudgmentDisplay =
     mode === "debate" && result.debateJudgment
       ? buildDebateJudgmentDisplay(result.debateJudgment, debateAssignmentLabels)
       : null;
+  const nextSpeakerRole: Exclude<SpeakerRole, "audit"> | null =
+    hasSynthesis || hasJudgment ? null : pickNextSpeaker(result.responses);
+  const nextSpeakerLabel = nextSpeakerRole
+    ? nextSpeakerRole === "vision"
+      ? "構想AI"
+      : "現実AI"
+    : null;
 
   const timelineEntries = buildTimelineEntries({
     mode,
@@ -413,6 +504,7 @@ export function MeetingWorkspace() {
         hasJudgment={hasJudgment}
         synthesisDisplay={synthesisDisplay}
         debateJudgmentDisplay={debateJudgmentDisplay}
+        nextSpeakerLabel={nextSpeakerLabel}
       />
 
       <ControlSidebar

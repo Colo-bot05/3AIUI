@@ -16,8 +16,9 @@ export interface TimelinePanelProps {
   timelineEntries: TimelineEntry[];
   hasSynthesis: boolean;
   hasJudgment: boolean;
-  synthesisDisplay: SynthesisDisplay;
+  synthesisDisplay: SynthesisDisplay | null;
   debateJudgmentDisplay: DebateJudgmentDisplay | null;
+  nextSpeakerLabel: string | null;
 }
 
 export function TimelinePanel({
@@ -28,6 +29,7 @@ export function TimelinePanel({
   hasJudgment,
   synthesisDisplay,
   debateJudgmentDisplay,
+  nextSpeakerLabel,
 }: TimelinePanelProps) {
   return (
     <section className="glass-panel grid-pattern overflow-hidden rounded-[2rem]">
@@ -140,7 +142,7 @@ export function TimelinePanel({
 
                       <div className="grid gap-3">
                         {(entry.messageType === "synthesis"
-                          ? synthesisDisplay.sections
+                          ? synthesisDisplay?.sections ?? []
                           : debateJudgmentDisplay?.sections ?? []
                         ).map((section) => (
                           <section
@@ -187,6 +189,14 @@ export function TimelinePanel({
               </article>
             );
           })}
+
+          {nextSpeakerLabel ? (
+            <div className="flex items-center gap-3 pl-10">
+              <span className="rounded-full border border-zinc-900/10 bg-white/80 px-3 py-1 text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-500">
+                次: {nextSpeakerLabel}
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
     </section>
