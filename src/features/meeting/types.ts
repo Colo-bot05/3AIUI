@@ -80,10 +80,17 @@ export interface MeetingRunResult {
   generatedAt: string;
 }
 
+export interface RolePrompts {
+  vision: string;
+  reality: string;
+  audit: string;
+}
+
 export interface RunMeetingInput {
   theme: string;
   mode: MeetingMode;
   attachments?: MeetingAttachment[];
+  rolePrompts?: RolePrompts;
 }
 
 export interface ConversationStateSnapshot {

@@ -1,11 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+import { DEFAULT_ROLE_PROMPTS } from "@/features/meeting/default-prompts";
 import type {
   DebateJudgmentResult,
   MeetingAttachment,
   MeetingMode,
   MeetingRunResult,
   RoleResponse,
+  RolePrompts,
   RunMeetingInput,
   SpeakerRole,
   SynthesisResult,
@@ -152,13 +154,13 @@ function createClient() {
   return new Anthropic({ apiKey });
 }
 
-function buildSystemPrompt(mode: MeetingMode): string {
+function buildSystemPrompt(mode: MeetingMode, rolePrompts: RolePrompts): string {
   const lines = [
     "あなたは 3 人の AI が同席する会議の進行役です。",
     "3 人の役割は次のとおり。",
-    `- vision (${ROLE_META.vision.label}): ${ROLE_META.vision.viewpoint} / ${ROLE_META.vision.emphasis}`,
-    `- reality (${ROLE_META.reality.label}): ${ROLE_META.reality.viewpoint} / ${ROLE_META.reality.emphasis}`,
-    `- audit (${ROLE_META.audit.label}): ${ROLE_META.audit.viewpoint} / ${ROLE_META.audit.emphasis}`,
+    `- vision (${ROLE_META.vision.label}): ${rolePrompts.vision}`,
+    `- reality (${ROLE_META.reality.label}): ${rolePrompts.reality}`,
+    `- audit (${ROLE_META.audit.label}): ${rolePrompts.audit}`,
     "",
     `現在のモード: ${mode} — ${MODE_GUIDANCE[mode]}`,
     "",
@@ -235,14 +237,16 @@ async function runAnthropicMeeting({
   theme,
   mode,
   attachments = [],
+  rolePrompts,
 }: RunMeetingInput): Promise<MeetingRunResult> {
   const client = createClient();
   const normalizedTheme = theme.trim() || "ローカルLLM構築を加速する3AI会議UI";
+  const effectiveRolePrompts = rolePrompts ?? DEFAULT_ROLE_PROMPTS;
 
   const message = await client.messages.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
-    system: buildSystemPrompt(mode),
+    system: buildSystemPrompt(mode, effectiveRolePrompts),
     tools: [meetingResultTool],
     tool_choice: { type: "tool", name: "produce_meeting_result" },
     messages: [
