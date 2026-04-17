@@ -3,11 +3,7 @@
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 
-import type { ParsedAttachmentResponse, WorkspaceAttachmentItem } from "@/features/attachments/types";
-import {
-  MAX_ATTACHMENT_SIZE_BYTES,
-  SUPPORTED_ATTACHMENT_EXTENSIONS,
-} from "@/features/attachments/types";
+import type { WorkspaceAttachmentItem } from "@/features/attachments/types";
 import { MODE_OPTIONS } from "@/features/meeting/mode-config";
 import {
   buildDebateJudgmentDisplay,
@@ -26,235 +22,27 @@ import type {
   DebateRole,
   DebateRoleAssignments,
   MeetingAttachment,
-  MeetingMessageType,
   MeetingMode,
   MeetingRunResult,
-  SpeakerRole,
 } from "@/features/meeting/types";
-import type {
-  SessionAttachmentContext,
-  SessionAttachmentReference,
-} from "@/features/session/types";
 import { inMemorySessionRepository } from "@/lib/session/in-memory-session-repository";
 
-const DEFAULT_THEME =
-  "商用LLMを使って、ローカルLLM構築の設計議論を加速するMVPを考えたい";
-
-const INITIAL_RESULT: MeetingRunResult = {
-  theme: DEFAULT_THEME,
-  mode: "design_review",
-  generatedAt: "2026-04-16T00:00:00.000Z",
-  responses: [
-    {
-      role: "vision",
-      label: "構想AI",
-      viewpoint: "可能性を押し広げる提案役",
-      emphasis: "新しい価値の打ち出し",
-      content:
-        "3AIをただ並べるのではなく、“会議”として見せることでプロダクトの意味が立ちます。\n\nユーザーはテーマを入力したあと、3つの人格が異なる立場で考え、それを最後に統合する流れを一度で体験できるべきです。",
-    },
-    {
-      role: "reality",
-      label: "現実AI",
-      viewpoint: "実装・運用の現実性を見る実務役",
-      emphasis: "実装順序とコスト感",
-      content:
-        "MVPでは、UIとモックAPIの境界を先に作れば十分です。\n\n本物のLLM接続を急がず、まずは入力・実行・3AI表示・統合結果表示までの一連の導線を壊れない形で整えましょう。",
-    },
-    {
-      role: "audit",
-      label: "監査AI",
-      viewpoint: "抜け漏れやリスクを止める監査役",
-      emphasis: "失敗条件の先回り",
-      content:
-        "最初のPRで守るべきなのは、責務を混ぜないことと、広げすぎないことです。\n\nCI・Docker・READMEまで含めておくと、次のPR以降が安全に進められます。",
-    },
-  ],
-  synthesis: {
-    agreements: [
-      "3AIの役割が一目で分かるUIにする。",
-      "統合結果エリアを画面の主役の1つとして扱う。",
-      "モック実装でもAPI境界を作って将来差し替えやすくする。",
-    ],
-    openQuestions: [
-      "実LLM接続時のProvider Adapterの責務範囲。",
-      "会話履歴保存の初期スキーマ設計。",
-      "発言を逐次ストリーミングにするかどうか。",
-    ],
-    recommendation:
-      "最初の土台では、会議UI・モックAPI・Docker・CI・READMEを整え、次のPRで永続化と実オーケストレーションの足場へ進むのが自然です。",
-  },
-};
-
-const ROLE_STYLES = {
-  vision: {
-    bubble: "border-orange-200 bg-orange-50/90",
-    marker: "bg-orange-500",
-    accent: "text-orange-900",
-    model: "GPT",
-  },
-  reality: {
-    bubble: "border-sky-200 bg-sky-50/90",
-    marker: "bg-sky-500",
-    accent: "text-sky-900",
-    model: "Gemini",
-  },
-  audit: {
-    bubble: "border-emerald-200 bg-emerald-50/90",
-    marker: "bg-emerald-500",
-    accent: "text-emerald-900",
-    model: "Claude",
-  },
-} as const;
-
-const PANEL_PLACEHOLDERS = {
-  brainstorm: {
-    heading: "発散メモ",
-    items: [
-      "アイデア一覧は統合指示後に表示",
-      "有望案の抽出はまだ未実行",
-      "補足観点は次の整理待ち",
-    ],
-    note: "ユーザーが「統合して」「ここまでで整理して」と指示するまで、発散中の表示を維持します。",
-  },
-  design_review: {
-    heading: "論点メモ",
-    items: [
-      "合意事項はまだ未確定",
-      "未決事項は議論の進行に応じて整理",
-      "懸念点と次アクションは後続PRで連動予定",
-    ],
-    note: "ディスカッションでは、ユーザーの整理指示があるまで議論中の状態を保つ前提です。",
-  },
-  debate: {
-    heading: "判定メモ",
-    items: [
-      "賛成側・反対側・審判の割当UIは次PRで接続",
-      "判定結果はまだ未実行",
-      "残る論点の整理だけを表示枠として先置き",
-    ],
-    note: "このPRではレイアウトだけを先に作り、判定ロジックや役割制約は実装しません。",
-  },
-} as const;
-
-const DEBATE_MODELS: Array<{ value: DebateModel; label: string }> = [
-  { value: "gpt", label: "GPT" },
-  { value: "gemini", label: "Gemini" },
-  { value: "claude", label: "Claude" },
-];
-
-const DEBATE_ROLE_LABELS: Record<DebateRole, string> = {
-  pro: "賛成側AI",
-  con: "反対側AI",
-  judge: "審判AI",
-};
-
-const INITIAL_DEBATE_ASSIGNMENTS: DebateRoleAssignments = {
-  pro: "gpt",
-  con: "gemini",
-  judge: "claude",
-};
-
-type TimelineEntry = {
-  id: string;
-  messageType: MeetingMessageType;
-  title: string;
-  label: string;
-  accentClass: string;
-  markerClass: string;
-  body: string;
-  meta?: string;
-  side?: "left" | "right";
-};
-
-function formatTimestamp(isoTimestamp: string) {
-  return new Intl.DateTimeFormat("ja-JP", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Asia/Tokyo",
-  }).format(new Date(isoTimestamp));
-}
-
-function pickModelLabel(value: DebateModel | "") {
-  return DEBATE_MODELS.find((item) => item.value === value)?.label ?? "未選択";
-}
-
-function formatFileSize(size: number) {
-  if (size < 1024) {
-    return `${size} B`;
-  }
-
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function hasReadableAttachmentPreview(excerpt: string) {
-  return excerpt.trim().length >= 8;
-}
-
-function isHardAttachmentError(error?: string) {
-  if (!error) {
-    return false;
-  }
-
-  return (
-    error.includes("対応していないファイル形式") ||
-    error.includes("ファイルサイズが上限を超えています")
-  );
-}
-
-type WorkspaceAction = "continue" | "finalize";
-
-function buildSessionAttachmentReference(
-  attachment: WorkspaceAttachmentItem,
-): SessionAttachmentReference {
-  return {
-    id: attachment.id,
-    filename: attachment.filename,
-    extension: attachment.extension,
-    mimeType: attachment.mimeType,
-    size: attachment.size,
-    status: attachment.status,
-  };
-}
-
-function buildSessionAttachmentContext(
-  attachments: WorkspaceAttachmentItem[],
-): SessionAttachmentContext | undefined {
-  if (attachments.length === 0) {
-    return undefined;
-  }
-
-  const references = attachments.map(buildSessionAttachmentReference);
-
-  return {
-    attachmentIds: references.map((attachment) => attachment.id),
-    attachmentCount: references.length,
-    attachmentNames: references.map((attachment) => attachment.filename),
-    attachments: references,
-  };
-}
-
-function buildAttachmentErrorItem(
-  file: Pick<File, "name" | "type" | "size">,
-  extension: WorkspaceAttachmentItem["extension"],
-  error: string,
-): WorkspaceAttachmentItem {
-  return {
-    id: `attachment-error-${Math.random().toString(36).slice(2, 10)}`,
-    filename: file.name,
-    extension,
-    mimeType: file.type || "application/octet-stream",
-    size: file.size,
-    extractedText: "",
-    excerpt: "",
-    status: "error",
-    error,
-  };
-}
+import { ControlSidebar } from "./meeting-workspace/control-sidebar";
+import {
+  DEBATE_ROLE_LABELS,
+  DEFAULT_THEME,
+  INITIAL_DEBATE_ASSIGNMENTS,
+  INITIAL_RESULT,
+  PANEL_PLACEHOLDERS,
+  buildFallbackAttachmentErrorItem,
+  buildSessionAttachmentContext,
+  buildTimelineEntries,
+  parseSelectedAttachmentFile,
+  pickActionLabels,
+  pickModelLabel,
+  type WorkspaceAction,
+} from "./meeting-workspace/shared";
+import { TimelinePanel } from "./meeting-workspace/timeline-panel";
 
 export function MeetingWorkspace() {
   const [theme, setTheme] = useState(DEFAULT_THEME);
@@ -309,79 +97,14 @@ export function MeetingWorkspace() {
     }
 
     const parsedAttachments = await Promise.allSettled(
-      selectedFiles.map(async (file): Promise<WorkspaceAttachmentItem> => {
-        const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-
-        if (
-          !SUPPORTED_ATTACHMENT_EXTENSIONS.includes(
-            extension as (typeof SUPPORTED_ATTACHMENT_EXTENSIONS)[number],
-          )
-        ) {
-          return buildAttachmentErrorItem(file, "txt", "対応していないファイル形式です。");
-        }
-
-        if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
-          return buildAttachmentErrorItem(
-            file,
-            extension as WorkspaceAttachmentItem["extension"],
-            "ファイルサイズが上限を超えています。",
-          );
-        }
-
-        const formData = new FormData();
-        formData.append("file", file);
-
-        try {
-          const response = await fetch("/api/attachments/parse", {
-            method: "POST",
-            body: formData,
-          });
-          const payload = (await response.json()) as ParsedAttachmentResponse;
-
-          if (!response.ok || !payload.attachment) {
-            return buildAttachmentErrorItem(
-              file,
-              extension as WorkspaceAttachmentItem["extension"],
-              payload.error?.message ?? "ファイル解析に失敗しました。",
-            );
-          }
-
-          return {
-            ...payload.attachment,
-            status: "ready",
-          };
-        } catch {
-          return buildAttachmentErrorItem(
-            file,
-            extension as WorkspaceAttachmentItem["extension"],
-            "ファイル解析に失敗しました。",
-          );
-        }
-      }),
+      selectedFiles.map(parseSelectedAttachmentFile),
     );
 
-    const nextAttachments = parsedAttachments.map((result, index) => {
-      if (result.status === "fulfilled") {
-        return result.value;
-      }
-
-      const file = selectedFiles[index];
-      const extension = file?.name.split(".").pop()?.toLowerCase() ?? "";
-
-      return buildAttachmentErrorItem(
-        {
-          name: file?.name ?? "unknown",
-          type: file?.type || "application/octet-stream",
-          size: file?.size ?? 0,
-        },
-        SUPPORTED_ATTACHMENT_EXTENSIONS.includes(
-          extension as (typeof SUPPORTED_ATTACHMENT_EXTENSIONS)[number],
-        )
-          ? (extension as WorkspaceAttachmentItem["extension"])
-          : "txt",
-        "ファイル解析に失敗しました。",
-      );
-    });
+    const nextAttachments = parsedAttachments.map((result, index) =>
+      result.status === "fulfilled"
+        ? result.value
+        : buildFallbackAttachmentErrorItem(selectedFiles[index]),
+    );
 
     setAttachments((current) => [
       ...current,
@@ -542,6 +265,23 @@ export function MeetingWorkspace() {
     }
   }
 
+  function handleModeChange(nextMode: MeetingMode) {
+    setMode(nextMode);
+    setConversationState(getInitialConversationState(nextMode));
+    setError(null);
+  }
+
+  function handleDebateAssignmentChange(
+    role: DebateRole,
+    value: DebateModel | "",
+  ) {
+    setDebateAssignments((current) => ({
+      ...current,
+      [role]: value,
+    }));
+    setError(null);
+  }
+
   const activeMode = MODE_OPTIONS.find((option) => option.value === mode) ?? MODE_OPTIONS[1];
   const activeState = buildConversationStateSnapshot(mode, conversationState);
   const stateCandidates = getAllowedStatesForMode(mode).map((state) =>
@@ -560,22 +300,7 @@ export function MeetingWorkspace() {
     lastDiscussionMode === mode &&
     (mode !== "debate" ||
       (!hasIncompleteDebateAssignments && !hasDuplicateDebateAssignments));
-  const actionLabels =
-    mode === "debate"
-      ? {
-          continue: "議論を続ける",
-          finalize: "判定する",
-          helper:
-            "議論の継続と判定は別操作です。判定はユーザーが明示的に締めたい時だけ実行します。",
-          finalizeNote: "ここまでの主張を審判観点で整理して結論を返します。",
-        }
-      : {
-          continue: "会話を続ける",
-          finalize: "統合する",
-          helper:
-            "会話の継続と統合は別操作です。統合はここまでの内容を締める時だけ使います。",
-          finalizeNote: "ここまでの会話を整理して要約・推奨案を返します。",
-        };
+  const actionLabels = pickActionLabels(mode);
   const debateAssignmentSummary = [
     `${DEBATE_ROLE_LABELS.pro}: ${pickModelLabel(debateAssignments.pro)}`,
     `${DEBATE_ROLE_LABELS.con}: ${pickModelLabel(debateAssignments.con)}`,
@@ -596,750 +321,62 @@ export function MeetingWorkspace() {
       ? buildDebateJudgmentDisplay(result.debateJudgment, debateAssignmentLabels)
       : null;
 
-  const timelineEntries: TimelineEntry[] = [
-    {
-      id: "status",
-      messageType: "system_status",
-      title: "ワークスペース状態",
-      label: activeState.label,
-      accentClass: "text-zinc-700",
-      markerClass: "bg-zinc-400",
-      body: activeState.hint,
-      meta: `system_status / ${activeState.state}`,
-    },
-    {
-      id: "user-theme",
-      messageType: "user",
-      title: "ユーザー",
-      label: "テーマ投稿",
-      accentClass: "text-zinc-950",
-      markerClass: "bg-zinc-950",
-      body:
-        mode === "debate"
-          ? `${submittedPrompt}\n\n現在の割当\n${debateAssignmentSummary}${
-              attachmentSummary ? `\n\n前提資料\n${attachmentSummary}` : ""
-            }`
-          : `${submittedPrompt}${
-              attachmentSummary ? `\n\n前提資料\n${attachmentSummary}` : ""
-            }`,
-      meta:
-        mode === "debate"
-          ? `mode: ${activeMode.label} / roles assigned`
-          : `mode: ${activeMode.label}`,
-      side: "right",
-    },
-    ...result.responses.map((response, index) => ({
-      id: response.role,
-      messageType: "ai_message" as const,
-      title: response.label,
-      label: response.viewpoint,
-      accentClass: ROLE_STYLES[response.role].accent,
-      markerClass: ROLE_STYLES[response.role].marker,
-      body: response.content,
-      meta: `${ROLE_STYLES[response.role].model} / turn ${index + 1}`,
-    })),
-    ...(mode === "debate"
-      ? hasJudgment && debateJudgmentDisplay
-        ? [
-            {
-              id: "debate-judgment",
-              messageType: "debate_judgment" as const,
-              title: "判定結果",
-              label: "ユーザー明示指示で生成",
-              accentClass: "text-violet-900",
-              markerClass: "bg-violet-500",
-              body: debateJudgmentDisplay.body,
-              meta: "debate_judgment / explicit trigger",
-            },
-          ]
-        : [
-            {
-              id: "synthesis-waiting",
-              messageType: "debate_judgment" as const,
-              title: "判定待ち",
-              label: "ユーザーが判定指示を出すまで保留",
-              accentClass: "text-violet-900",
-              markerClass: "bg-violet-500",
-              body: "この位置に最終判定メッセージが入る想定です。ユーザーが明示的に判定を依頼するまで、審判AIは結論を固定しません。",
-              meta: "debate_judgment placeholder",
-            },
-          ]
-      : hasSynthesis
-        ? [
-            {
-              id: "synthesis-result",
-              messageType: "synthesis" as const,
-              title: "統合結果",
-              label: "ユーザー明示指示で生成",
-              accentClass: "text-violet-900",
-              markerClass: "bg-violet-500",
-              body: synthesisDisplay.body,
-              meta: "synthesis / explicit trigger",
-            },
-          ]
-        : [
-            {
-              id: "synthesis-waiting",
-              messageType: "synthesis" as const,
-              title: "統合待ち",
-              label: "ユーザーが整理指示を出すまで保留",
-              accentClass: "text-violet-900",
-              markerClass: "bg-violet-500",
-              body: "この位置に統合メッセージが入る想定です。ユーザーが明示的に整理を依頼するまで、AI はまだ最終結論を固定しません。",
-              meta: "synthesis placeholder",
-            },
-          ]),
-  ];
+  const timelineEntries = buildTimelineEntries({
+    mode,
+    submittedPrompt,
+    activeMode,
+    activeState,
+    debateAssignmentSummary,
+    attachmentSummary,
+    result,
+    hasSynthesis,
+    hasJudgment,
+    synthesisDisplay,
+    debateJudgmentDisplay,
+  });
 
   return (
     <div className="grid gap-6 pb-8 xl:grid-cols-[minmax(0,1.35fr)_380px]">
-      <section className="glass-panel grid-pattern overflow-hidden rounded-[2rem]">
-        <div className="border-b border-zinc-900/10 px-6 py-6 sm:px-8">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="space-y-3">
-              <span className="section-title">3AI Group Chat Workspace</span>
-              <h1 className="max-w-4xl text-4xl font-semibold tracking-[-0.04em] text-zinc-950 sm:text-5xl">
-                3AI が会話し、ユーザーが必要なタイミングで整理を指示する。
-              </h1>
-              <p className="max-w-3xl text-base leading-8 text-zinc-600 sm:text-lg">
-                3AI を比較するのではなく、ひとつのテーマをめぐって役割付きで会話するワークスペースです。
-                このPRではタイムライン型レイアウトを先に整え、統合や判定の本ロジックはまだ載せません。
-              </p>
-            </div>
+      <TimelinePanel
+        activeMode={activeMode}
+        activeState={activeState}
+        timelineEntries={timelineEntries}
+        hasSynthesis={hasSynthesis}
+        hasJudgment={hasJudgment}
+        synthesisDisplay={synthesisDisplay}
+        debateJudgmentDisplay={debateJudgmentDisplay}
+      />
 
-            <div className="flex flex-wrap items-center gap-3">
-              <span
-                className={`rounded-full border px-4 py-2 text-sm font-semibold ${activeMode.panelTone}`}
-              >
-                {activeMode.label} / {activeState.label}
-              </span>
-              <span className="rounded-full border border-zinc-900/10 bg-white/80 px-4 py-2 text-sm text-zinc-600">
-                mock conversation
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="px-4 py-6 sm:px-6 lg:px-8">
-          <div className="timeline-rail space-y-5">
-            {timelineEntries.map((entry) => {
-              const isUser = entry.side === "right";
-              const isSystem = entry.messageType === "system_status";
-              const isSummaryPlaceholder =
-                entry.messageType === "synthesis" ||
-                entry.messageType === "debate_judgment";
-
-              return (
-                <article
-                  key={entry.id}
-                  className={`relative flex gap-4 ${isUser ? "justify-end" : "justify-start"}`}
-                >
-                  {!isUser ? (
-                    <div
-                      className={`relative z-10 mt-3 h-4 w-4 shrink-0 rounded-full border-4 border-[#f7f0e6] ${entry.markerClass}`}
-                    />
-                  ) : null}
-
-                  <div
-                    className={`max-w-[90%] rounded-[1.6rem] border px-5 py-4 shadow-[0_18px_40px_rgba(25,25,25,0.06)] sm:max-w-[78%] ${
-                      isSystem
-                        ? "border-zinc-900/10 bg-white/70"
-                        : isSummaryPlaceholder
-                          ? "border-violet-200 bg-violet-50/85"
-                          : isUser
-                            ? "border-zinc-900/10 bg-zinc-950 text-white"
-                            : ROLE_STYLES[entry.id as SpeakerRole]?.bubble ??
-                              "border-white/60 bg-white/80"
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={`text-sm font-semibold ${
-                          isUser
-                            ? "text-white"
-                            : isSummaryPlaceholder
-                              ? "text-violet-950"
-                              : entry.accentClass
-                        }`}
-                      >
-                        {entry.title}
-                      </span>
-                      <span
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-mono ${
-                          isUser
-                            ? "border-white/20 bg-white/10 text-white/80"
-                            : isSummaryPlaceholder
-                              ? "border-violet-200 bg-white/60 text-violet-700"
-                              : "border-zinc-900/10 bg-white/75 text-zinc-500"
-                        }`}
-                      >
-                        {entry.label}
-                      </span>
-                    </div>
-
-                    <p
-                      className={`mt-3 rich-text text-sm ${
-                        isUser ? "text-white/92" : "text-zinc-700"
-                      }`}
-                    >
-                      {entry.messageType === "synthesis" && hasSynthesis ? null : entry.body}
-                    </p>
-
-                    {(entry.messageType === "synthesis" && hasSynthesis) ||
-                    (entry.messageType === "debate_judgment" && hasJudgment) ? (
-                      <div className="mt-4 space-y-3">
-                        <div className="rounded-2xl border border-violet-200 bg-white/75 px-4 py-3">
-                          <div className="text-xs font-mono uppercase tracking-[0.18em] text-violet-500">
-                            {entry.messageType === "synthesis"
-                              ? "synthesis note"
-                              : "judgment note"}
-                          </div>
-                          <p className="mt-2 text-sm leading-7 text-zinc-700">
-                            {entry.messageType === "synthesis"
-                              ? "ユーザーの明示指示を受けて、ここまでの議論を整理した結果です。"
-                              : "ユーザーの明示指示を受けて、ここまでのディベートを審判観点で整理した結果です。"}
-                          </p>
-                        </div>
-
-                        <div className="grid gap-3">
-                          {(entry.messageType === "synthesis"
-                            ? synthesisDisplay.sections
-                            : debateJudgmentDisplay?.sections ?? []
-                          ).map((section) => (
-                            <section
-                              key={section.title}
-                              className={`rounded-2xl border px-4 py-3 ${section.tone}`}
-                            >
-                              <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-500">
-                                {section.title}
-                              </div>
-                              {section.items ? (
-                                <ul className="mt-2 space-y-2 text-sm leading-7 text-zinc-700">
-                                  {section.items.map((item) => (
-                                    <li key={item} className="flex gap-3">
-                                      <span className="mt-2 h-2 w-2 rounded-full bg-zinc-500/60" />
-                                      <span>{item}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : (
-                                <p className="mt-2 text-sm leading-7 text-zinc-700">
-                                  {section.body}
-                                </p>
-                              )}
-                            </section>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {entry.meta ? (
-                      <div
-                        className={`mt-4 text-[11px] font-mono uppercase tracking-[0.18em] ${
-                          isUser ? "text-white/60" : "text-zinc-400"
-                        }`}
-                      >
-                        {entry.meta}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {isUser ? (
-                    <div className="relative z-10 mt-3 h-4 w-4 shrink-0 rounded-full border-4 border-[#f7f0e6] bg-zinc-950" />
-                  ) : null}
-                </article>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      <aside className="glass-panel rounded-[2rem] p-5 sm:p-6 xl:sticky xl:top-8 xl:self-start">
-        <div className="space-y-6">
-          <section className="space-y-4">
-            <div>
-              <p className="section-title">Control Panel</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-zinc-950">
-                会話コントロール
-              </h2>
-              <p className="mt-2 text-sm leading-7 text-zinc-600">
-                右パネルは操作と状態確認の置き場です。今回のPRでは要約値や状態値はプレースホルダー表示です。
-              </p>
-            </div>
-
-            <div>
-              <p className="section-title">Theme</p>
-              <textarea
-                value={theme}
-                onChange={(event) => setTheme(event.target.value)}
-                rows={4}
-                className="mt-2 w-full resize-none rounded-2xl border border-zinc-900/10 bg-white px-4 py-3 text-sm leading-7 text-zinc-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
-                placeholder="議論したいテーマを入力"
-              />
-            </div>
-
-            <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="section-title">Attachments</p>
-                  <h3 className="mt-2 text-sm font-semibold text-zinc-950">
-                    前提資料
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="rounded-full border border-zinc-900/10 bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                >
-                  資料を追加
-                </button>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".pdf,.docx,.pptx,.xlsx,.md,.txt"
-                onChange={handleAttachmentSelection}
-                className="hidden"
-              />
-              <p className="mt-3 text-xs leading-6 text-zinc-500">
-                pdf / docx / pptx / xlsx / md / txt を会議コンテキストとして添付できます。1ファイルあたり最大 {formatFileSize(MAX_ATTACHMENT_SIZE_BYTES)} です。
-              </p>
-
-              {attachments.length > 0 ? (
-                <div className="mt-4 space-y-3">
-                  {attachments.map((attachment) => (
-                    <div
-                      key={attachment.id}
-                      className="rounded-2xl border border-zinc-900/10 bg-white px-4 py-3"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-zinc-950">
-                            {attachment.filename}
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-500">
-                            <span>{attachment.extension}</span>
-                            <span>{formatFileSize(attachment.size)}</span>
-                            <span>
-                              {attachment.status === "ready"
-                                ? "ready"
-                                : isHardAttachmentError(attachment.error)
-                                  ? "error"
-                                  : "no preview"}
-                            </span>
-                          </div>
-                          {attachment.error && isHardAttachmentError(attachment.error) ? (
-                            <p className="mt-2 text-xs leading-6 text-rose-600">
-                              {attachment.error}
-                            </p>
-                          ) : (
-                            <p className="mt-2 line-clamp-3 text-xs leading-6 text-zinc-600">
-                              {attachment.error && !isHardAttachmentError(attachment.error)
-                                ? "プレビューなし"
-                                : hasReadableAttachmentPreview(attachment.excerpt)
-                                ? attachment.excerpt
-                                : "プレビューなし"}
-                            </p>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleAttachmentRemove(attachment.id)}
-                          className="rounded-full border border-zinc-900/10 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:border-zinc-900/20 hover:bg-zinc-50"
-                        >
-                          削除
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-4 text-sm leading-7 text-zinc-500">
-                  添付した資料は、現在の会議の前提コンテキストとして使われます。
-                </div>
-              )}
-            </div>
-
-            <div>
-              <p className="section-title">Mode</p>
-              <div className="mt-2 grid gap-2">
-                {MODE_OPTIONS.map((option) => {
-                  const active = option.value === mode;
-
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => {
-                        setMode(option.value);
-                        setConversationState(getInitialConversationState(option.value));
-                        setError(null);
-                      }}
-                      className={`rounded-2xl border px-4 py-3 text-left transition ${
-                        active
-                          ? "border-zinc-950 bg-zinc-950 text-white shadow-sm"
-                          : "border-zinc-900/10 bg-white text-zinc-600 hover:border-zinc-900/20 hover:bg-zinc-50"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold">{option.label}</div>
-                        <span
-                          className={`rounded-full border px-2.5 py-1 text-[11px] font-mono ${
-                            active
-                              ? "border-white/20 bg-white/10 text-white/80"
-                              : option.panelTone
-                          }`}
-                        >
-                          {buildConversationStateSnapshot(
-                            option.value,
-                            getInitialConversationState(option.value),
-                          ).label}
-                        </span>
-                      </div>
-                      <div
-                        className={`mt-1 text-xs leading-5 ${
-                          active ? "text-white/75" : ""
-                        }`}
-                      >
-                        {option.description}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {mode === "debate" ? (
-              <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/70 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-zinc-950">
-                    ディベート役割設定
-                  </h3>
-                  <span className="rounded-full border border-zinc-900/10 bg-zinc-100 px-2.5 py-1 text-[11px] font-mono text-zinc-600">
-                    validation active
-                  </span>
-                </div>
-                <div className="mt-3 space-y-3">
-                  {(Object.keys(DEBATE_ROLE_LABELS) as DebateRole[]).map((role) => (
-                    <label
-                      key={role}
-                      className="block rounded-2xl border border-zinc-900/10 bg-white px-3 py-3"
-                    >
-                      <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
-                        {DEBATE_ROLE_LABELS[role]}
-                      </div>
-                      <select
-                        value={debateAssignments[role]}
-                        onChange={(event) => {
-                          const nextValue = event.target.value as DebateModel | "";
-                          setDebateAssignments((current) => ({
-                            ...current,
-                            [role]: nextValue,
-                          }));
-                          setError(null);
-                        }}
-                        className="mt-2 w-full rounded-xl border border-zinc-900/10 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 outline-none transition focus:border-zinc-900/30 focus:ring-4 focus:ring-zinc-100"
-                      >
-                        <option value="">未選択</option>
-                        {DEBATE_MODELS.map((model) => (
-                          <option key={model.value} value={model.value}>
-                            {model.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ))}
-                </div>
-                <div className="mt-4 space-y-2 text-xs leading-6 text-zinc-500">
-                  <p>同じAIを複数役割に割り当てることはできません。</p>
-                  <p>3つすべて選ばれていないとディベートは開始できません。</p>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="space-y-3 rounded-[1.5rem] border border-zinc-900/10 bg-zinc-50/80 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-zinc-950">アクション</h3>
-                <span className="rounded-full border border-zinc-900/10 bg-white px-2.5 py-1 text-[11px] font-mono text-zinc-500">
-                  continue / finalize
-                </span>
-              </div>
-
-              <div className="grid gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleRun("continue")}
-                  disabled={!canContinueDiscussion}
-                  className="inline-flex items-center justify-center rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
-                >
-                  {loading ? "会話を更新中..." : actionLabels.continue}
-                </button>
-
-                <div className="rounded-2xl border border-violet-200 bg-white px-4 py-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-mono uppercase tracking-[0.18em] text-violet-500">
-                        finalize
-                      </div>
-                      <div className="mt-1 text-sm font-semibold text-zinc-950">
-                        {actionLabels.finalize}
-                      </div>
-                    </div>
-                    <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-mono text-violet-700">
-                      end action
-                    </span>
-                  </div>
-                  <p className="mt-2 text-xs leading-6 text-zinc-600">
-                    {actionLabels.finalizeNote}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => handleRun("finalize")}
-                    disabled={!canFinalizeDiscussion}
-                    className="mt-3 inline-flex w-full items-center justify-center rounded-full border border-violet-300 bg-violet-50 px-5 py-3 text-sm font-semibold text-violet-900 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
-                  >
-                    {loading ? "会話を更新中..." : actionLabels.finalize}
-                  </button>
-                </div>
-              </div>
-
-              <p className="text-xs leading-6 text-zinc-500">
-                {mode === "debate"
-                  ? hasIncompleteDebateAssignments || hasDuplicateDebateAssignments
-                    ? "ディベートでは3役割のAI割当が揃うまで、継続も判定も実行できません。"
-                    : actionLabels.helper
-                  : canFinalizeDiscussion
-                    ? actionLabels.helper
-                    : "統合は、先にこのモードで会話を生成してから実行できます。"}
-              </p>
-            </div>
-
-            {error ? (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {error}
-              </div>
-            ) : null}
-          </section>
-
-          <section className="space-y-4">
-            <div>
-              <p className="section-title">Status & Summary</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-zinc-950">
-                右サイド要約
-              </h2>
-              <p className="mt-2 text-sm leading-7 text-zinc-600">
-                ここは最終的に合意事項や判定を集約する場所です。今はレイアウトだけ先に用意しています。
-              </p>
-            </div>
-
-            <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-zinc-950">現在状態</h3>
-                <span
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeMode.panelTone}`}
-                >
-                  {activeState.label}
-                </span>
-              </div>
-              <p className="mt-3 text-sm leading-7 text-zinc-600">
-                {activeState.hint}
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {stateCandidates.map((candidate) => (
-                  <span
-                    key={candidate.state}
-                    className={`rounded-full border px-2.5 py-1 text-[11px] font-mono ${
-                      candidate.state === activeState.state
-                        ? "border-zinc-900/20 bg-zinc-900 text-white"
-                        : "border-zinc-900/10 bg-white text-zinc-500"
-                    }`}
-                  >
-                    {candidate.label}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
-              <h3 className="text-sm font-semibold text-zinc-950">{activePlaceholder.heading}</h3>
-              {mode === "debate" && hasJudgment && debateJudgmentDisplay ? (
-                <div className="mt-3 space-y-3">
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-3 py-3">
-                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-emerald-700">
-                        judgment
-                      </div>
-                      <div className="mt-2 text-sm font-semibold text-emerald-950">
-                        ready
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-orange-200 bg-orange-50/80 px-3 py-3">
-                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-orange-700">
-                        pro
-                      </div>
-                      <div className="mt-2 text-sm font-semibold text-orange-950">
-                        {debateAssignmentLabels.pro}
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-sky-200 bg-sky-50/80 px-3 py-3">
-                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-sky-700">
-                        con
-                      </div>
-                      <div className="mt-2 text-sm font-semibold text-sky-950">
-                        {debateAssignmentLabels.con}
-                      </div>
-                    </div>
-                  </div>
-
-                  {debateJudgmentDisplay.sections.map((section) => (
-                    <section
-                      key={section.title}
-                      className={`rounded-2xl border px-4 py-4 ${section.tone}`}
-                    >
-                      <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-500">
-                        {section.title}
-                      </div>
-                      {section.items ? (
-                        <ul className="mt-2 space-y-2 text-sm leading-7 text-zinc-700">
-                          {section.items.map((item) => (
-                            <li key={item} className="flex gap-3">
-                              <span className="mt-2 h-2 w-2 rounded-full bg-zinc-500/60" />
-                              <span>{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="mt-2 text-sm leading-7 text-zinc-700">
-                          {section.body}
-                        </p>
-                      )}
-                    </section>
-                  ))}
-                </div>
-              ) : mode === "debate" ? (
-                <div className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
-                  {(Object.keys(DEBATE_ROLE_LABELS) as DebateRole[]).map((role) => (
-                    <div key={role} className="flex items-start justify-between gap-4 rounded-2xl border border-zinc-900/10 bg-zinc-50 px-3 py-3">
-                      <div>
-                        <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
-                          {DEBATE_ROLE_LABELS[role]}
-                        </div>
-                        <div className="mt-1 text-sm font-semibold text-zinc-900">
-                          {DEBATE_MODELS.find((item) => item.value === debateAssignments[role])?.label ??
-                            "未選択"}
-                        </div>
-                      </div>
-                      <span className="rounded-full border border-zinc-900/10 bg-white px-2.5 py-1 text-[11px] font-mono text-zinc-500">
-                        {debateAssignments[role] ? "assigned" : "required"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : hasSynthesis ? (
-                <div className="mt-3 space-y-3">
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-2xl border border-orange-200 bg-orange-50/80 px-3 py-3">
-                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-orange-700">
-                        agreements
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold text-orange-950">
-                        {result.synthesis.agreements.length}
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-sky-200 bg-sky-50/80 px-3 py-3">
-                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-sky-700">
-                        open points
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold text-sky-950">
-                        {result.synthesis.openQuestions.length}
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-violet-200 bg-violet-50/80 px-3 py-3">
-                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-violet-700">
-                        status
-                      </div>
-                      <div className="mt-2 text-sm font-semibold text-violet-950">
-                        ready
-                      </div>
-                    </div>
-                  </div>
-
-                  {synthesisDisplay.sections.map((section) => (
-                    <section
-                      key={section.title}
-                      className={`rounded-2xl border px-4 py-4 ${section.tone}`}
-                    >
-                      <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-500">
-                        {section.title}
-                      </div>
-                      {section.items ? (
-                        <ul className="mt-2 space-y-2 text-sm leading-7 text-zinc-700">
-                          {section.items.map((item) => (
-                            <li key={item} className="flex gap-3">
-                              <span className="mt-2 h-2 w-2 rounded-full bg-zinc-500/60" />
-                              <span>{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="mt-2 text-sm leading-7 text-zinc-700">
-                          {section.body}
-                        </p>
-                      )}
-                    </section>
-                  ))}
-                </div>
-              ) : (
-                <ul className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
-                  {activePlaceholder.items.map((item) => (
-                    <li key={item} className="flex gap-3">
-                      <span className="mt-2 h-2 w-2 rounded-full bg-zinc-400" />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div className="rounded-[1.5rem] border border-dashed border-zinc-300 bg-zinc-50/80 p-4">
-              <h3 className="text-sm font-semibold text-zinc-950">
-                次の実装でつなぐもの
-              </h3>
-              <p className="mt-3 text-sm leading-7 text-zinc-600">
-                {mode === "debate"
-                  ? hasJudgment
-                    ? "今回はユーザーの明示指示で判定結果を表示できるようになりました。次のPRでは debate の会話段階をさらに細かく分けます。"
-                    : "ユーザーが「判定して」「結論を出して」と指示した時だけ判定結果を表示する前提です。"
-                  : hasSynthesis
-                  ? "今回は明示トリガーで統合メッセージを出せるようになりました。次のPRで trigger 判定の精度や会話履歴前提の整理を広げます。"
-                  : activePlaceholder.note}
-              </p>
-              <div className="mt-4 text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-400">
-                {mode === "debate"
-                  ? hasJudgment
-                    ? "explicit judgment completed"
-                    : "waiting for explicit judgment request"
-                  : hasSynthesis
-                  ? "explicit synthesis completed"
-                  : "waiting for explicit synthesis request"}
-              </div>
-            </div>
-
-            <div className="rounded-[1.5rem] border border-zinc-900/10 bg-zinc-950 p-4 text-white">
-              <div className="text-xs font-mono uppercase tracking-[0.18em] text-white/55">
-                Last mock refresh
-              </div>
-              <div className="mt-2 text-lg font-semibold">
-                {formatTimestamp(result.generatedAt)}
-              </div>
-              <div className="mt-2 text-sm leading-7 text-white/72">
-                現在は mock provider で返した発言をタイムラインに並べています。統合結果はまだ自動確定しません。
-              </div>
-            </div>
-          </section>
-        </div>
-      </aside>
+      <ControlSidebar
+        theme={theme}
+        onThemeChange={setTheme}
+        mode={mode}
+        onModeChange={handleModeChange}
+        attachments={attachments}
+        fileInputRef={fileInputRef}
+        onAttachmentSelect={handleAttachmentSelection}
+        onAttachmentRemove={handleAttachmentRemove}
+        debateAssignments={debateAssignments}
+        onDebateAssignmentChange={handleDebateAssignmentChange}
+        loading={loading}
+        actionLabels={actionLabels}
+        canContinueDiscussion={canContinueDiscussion}
+        canFinalizeDiscussion={canFinalizeDiscussion}
+        hasIncompleteDebateAssignments={hasIncompleteDebateAssignments}
+        hasDuplicateDebateAssignments={hasDuplicateDebateAssignments}
+        onRun={handleRun}
+        error={error}
+        activeMode={activeMode}
+        activeState={activeState}
+        stateCandidates={stateCandidates}
+        activePlaceholder={activePlaceholder}
+        hasSynthesis={hasSynthesis}
+        hasJudgment={hasJudgment}
+        synthesisDisplay={synthesisDisplay}
+        debateJudgmentDisplay={debateJudgmentDisplay}
+        debateAssignmentLabels={debateAssignmentLabels}
+        result={result}
+      />
     </div>
   );
 }
