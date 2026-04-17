@@ -76,3 +76,24 @@ export function isExplicitSynthesisTrigger(
     normalizedInput.includes(trigger),
   );
 }
+
+const JUDGMENT_TRIGGERS = [
+  "判定して",
+  "統合して",
+  "結論を出して",
+  "どっちが妥当か整理して",
+];
+
+export function isExplicitJudgmentTrigger(
+  input: string,
+  mode: MeetingMode,
+): boolean {
+  if (mode !== "debate") {
+    return false;
+  }
+
+  const normalizedInput = input.trim();
+  return JUDGMENT_TRIGGERS.some((trigger) =>
+    normalizedInput.includes(trigger),
+  );
+}
