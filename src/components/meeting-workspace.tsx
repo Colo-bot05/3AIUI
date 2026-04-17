@@ -185,6 +185,8 @@ function pickModelLabel(value: DebateModel | "") {
   return DEBATE_MODELS.find((item) => item.value === value)?.label ?? "未選択";
 }
 
+type WorkspaceAction = "continue" | "finalize";
+
 export function MeetingWorkspace() {
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [submittedPrompt, setSubmittedPrompt] = useState(DEFAULT_THEME);
@@ -225,10 +227,15 @@ export function MeetingWorkspace() {
     mode === "debate" &&
     Object.values(debateAssignments).some((value) => value === "");
 
-  async function handleRun() {
+  async function handleRun(action: WorkspaceAction) {
     const trimmedInput = theme.trim();
-    const isSynthesisRequest = isExplicitSynthesisTrigger(trimmedInput, mode);
-    const isJudgmentRequest = isExplicitJudgmentTrigger(trimmedInput, mode);
+    const isFinalizeAction = action === "finalize";
+    const isSynthesisRequest =
+      mode !== "debate" &&
+      (isFinalizeAction || isExplicitSynthesisTrigger(trimmedInput, mode));
+    const isJudgmentRequest =
+      mode === "debate" &&
+      (isFinalizeAction || isExplicitJudgmentTrigger(trimmedInput, mode));
 
     if (mode === "debate") {
       if (hasIncompleteDebateAssignments) {
@@ -241,8 +248,6 @@ export function MeetingWorkspace() {
         return;
       }
 
-      setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
-
       if (isJudgmentRequest) {
         if (lastDiscussionMode !== "debate") {
           setError("先にディベートを開始してから判定してください。");
@@ -250,6 +255,7 @@ export function MeetingWorkspace() {
         }
 
         setError(null);
+        setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
         setConversationState("judged");
         await inMemorySessionRepository.appendEntry({
           sessionId: await ensureSessionId(),
@@ -263,14 +269,13 @@ export function MeetingWorkspace() {
     }
 
     if (isSynthesisRequest) {
-      setSubmittedPrompt(trimmedInput);
-
       if (lastDiscussionMode !== mode) {
         setError("先にこのモードで議論を表示してから統合してください。");
         return;
       }
 
       setError(null);
+      setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
       setConversationState("synthesized");
       await inMemorySessionRepository.appendEntry({
         sessionId: await ensureSessionId(),
@@ -336,6 +341,31 @@ export function MeetingWorkspace() {
   const hasSynthesis =
     mode !== "debate" && conversationState === "synthesized";
   const hasJudgment = mode === "debate" && conversationState === "judged";
+  const canContinueDiscussion =
+    !loading &&
+    (mode !== "debate" ||
+      (!hasIncompleteDebateAssignments && !hasDuplicateDebateAssignments));
+  const canFinalizeDiscussion =
+    !loading &&
+    lastDiscussionMode === mode &&
+    (mode !== "debate" ||
+      (!hasIncompleteDebateAssignments && !hasDuplicateDebateAssignments));
+  const actionLabels =
+    mode === "debate"
+      ? {
+          continue: "議論を続ける",
+          finalize: "判定する",
+          helper:
+            "議論の継続と判定は別操作です。判定はユーザーが明示的に締めたい時だけ実行します。",
+          finalizeNote: "ここまでの主張を審判観点で整理して結論を返します。",
+        }
+      : {
+          continue: "会話を続ける",
+          finalize: "統合する",
+          helper:
+            "会話の継続と統合は別操作です。統合はここまでの内容を締める時だけ使います。",
+          finalizeNote: "ここまでの会話を整理して要約・推奨案を返します。",
+        };
   const debateAssignmentSummary = [
     `${DEBATE_ROLE_LABELS.pro}: ${pickModelLabel(debateAssignments.pro)}`,
     `${DEBATE_ROLE_LABELS.con}: ${pickModelLabel(debateAssignments.con)}`,
@@ -727,24 +757,60 @@ export function MeetingWorkspace() {
               </div>
             ) : null}
 
-            <div className="flex flex-col gap-3">
-              <button
-                type="button"
-                onClick={handleRun}
-                disabled={
-                  loading ||
-                  (mode === "debate" &&
-                    (hasIncompleteDebateAssignments ||
-                      hasDuplicateDebateAssignments))
-                }
-                className="inline-flex items-center justify-center rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
-              >
-                {loading ? "会話を更新中..." : "会話を実行 / 統合"}
-              </button>
+            <div className="space-y-3 rounded-[1.5rem] border border-zinc-900/10 bg-zinc-50/80 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-zinc-950">アクション</h3>
+                <span className="rounded-full border border-zinc-900/10 bg-white px-2.5 py-1 text-[11px] font-mono text-zinc-500">
+                  continue / finalize
+                </span>
+              </div>
+
+              <div className="grid gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleRun("continue")}
+                  disabled={!canContinueDiscussion}
+                  className="inline-flex items-center justify-center rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+                >
+                  {loading ? "会話を更新中..." : actionLabels.continue}
+                </button>
+
+                <div className="rounded-2xl border border-violet-200 bg-white px-4 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-mono uppercase tracking-[0.18em] text-violet-500">
+                        finalize
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-zinc-950">
+                        {actionLabels.finalize}
+                      </div>
+                    </div>
+                    <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-mono text-violet-700">
+                      end action
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs leading-6 text-zinc-600">
+                    {actionLabels.finalizeNote}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleRun("finalize")}
+                    disabled={!canFinalizeDiscussion}
+                    className="mt-3 inline-flex w-full items-center justify-center rounded-full border border-violet-300 bg-violet-50 px-5 py-3 text-sm font-semibold text-violet-900 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
+                  >
+                    {loading ? "会話を更新中..." : actionLabels.finalize}
+                  </button>
+                </div>
+              </div>
+
               <p className="text-xs leading-6 text-zinc-500">
                 {mode === "debate"
-                  ? "ディベートでは3役割のAI割当が必須です。今回は割当UIと重複禁止のみを実装しています。"
-                  : "ブレストとディスカッションでは、ユーザーが「統合して」「整理して」といった明示指示を出した時だけ統合結果を表示します。"}
+                  ? hasIncompleteDebateAssignments || hasDuplicateDebateAssignments
+                    ? "ディベートでは3役割のAI割当が揃うまで、継続も判定も実行できません。"
+                    : actionLabels.helper
+                  : canFinalizeDiscussion
+                    ? actionLabels.helper
+                    : "統合は、先にこのモードで会話を生成してから実行できます。"}
               </p>
             </div>
 
