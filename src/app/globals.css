@@ -74,6 +74,26 @@ textarea {
   line-height: 1.75;
 }
 
+.timeline-rail {
+  position: relative;
+}
+
+.timeline-rail::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 1rem;
+  top: 0;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(24, 24, 27, 0.04) 0%,
+    rgba(24, 24, 27, 0.14) 12%,
+    rgba(24, 24, 27, 0.08) 88%,
+    rgba(24, 24, 27, 0.03) 100%
+  );
+}
+
 .grid-pattern {
   background-image:
     linear-gradient(rgba(24, 24, 27, 0.045) 1px, transparent 1px),

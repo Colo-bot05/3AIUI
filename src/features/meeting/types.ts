@@ -1,4 +1,10 @@
 export type MeetingMode = "brainstorm" | "design_review" | "debate";
+export type MeetingMessageType =
+  | "user"
+  | "ai_message"
+  | "synthesis"
+  | "debate_judgment"
+  | "system_status";
 
 export type SpeakerRole = "vision" | "reality" | "audit";
 
