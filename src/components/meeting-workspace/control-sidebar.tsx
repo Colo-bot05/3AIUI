@@ -188,7 +188,7 @@ export function ControlSidebar({
               </button>
             </div>
             <p className="mt-3 text-xs leading-6 text-zinc-500">
-              3 役割の system prompt を編集できます。保存した内容は次回の会議実行から反映されます（sessionStorage に保存）。
+              3 役割の system prompt を編集できます。保存した内容は以降のすべての会議実行に毎回反映されます（sessionStorage に保存）。
             </p>
           </div>
 
