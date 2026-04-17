@@ -3,10 +3,7 @@ import type {
   SynthesisDisplay,
 } from "@/features/meeting/presentation";
 import type { MODE_OPTIONS } from "@/features/meeting/mode-config";
-import type {
-  ConversationStateSnapshot,
-  SpeakerRole,
-} from "@/features/meeting/types";
+import type { ConversationStateSnapshot } from "@/features/meeting/types";
 
 import { ROLE_STYLES, type TimelineEntry } from "./shared";
 
@@ -87,7 +84,7 @@ export function TimelinePanel({
                         ? "border-violet-200 bg-violet-50/85"
                         : isUser
                           ? "border-zinc-900/10 bg-zinc-950 text-white"
-                          : ROLE_STYLES[entry.id as SpeakerRole]?.bubble ??
+                          : (entry.speakerRole && ROLE_STYLES[entry.speakerRole]?.bubble) ??
                             "border-white/60 bg-white/80"
                   }`}
                 >

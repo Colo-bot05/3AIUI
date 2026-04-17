@@ -16,6 +16,7 @@ import type {
   MeetingMessageType,
   MeetingMode,
   MeetingRunResult,
+  SpeakerRole,
 } from "@/features/meeting/types";
 import type {
   SessionAttachmentContext,
@@ -111,6 +112,7 @@ export type TimelineEntry = {
   body: string;
   meta?: string;
   side?: "left" | "right";
+  speakerRole?: SpeakerRole;
 };
 
 export type WorkspaceAction = "continue" | "finalize";
@@ -361,7 +363,7 @@ export function buildTimelineEntries({
       side: "right",
     },
     ...result.responses.map((response, index) => ({
-      id: response.role,
+      id: `turn-${index + 1}-${response.role}`,
       messageType: "ai_message" as const,
       title: response.label,
       label: response.viewpoint,
@@ -369,6 +371,7 @@ export function buildTimelineEntries({
       markerClass: ROLE_STYLES[response.role].marker,
       body: response.content,
       meta: `${ROLE_STYLES[response.role].model} / turn ${index + 1}`,
+      speakerRole: response.role,
     })),
     ...(mode === "debate"
       ? hasJudgment && debateJudgmentDisplay
@@ -386,7 +389,7 @@ export function buildTimelineEntries({
           ]
         : [
             {
-              id: "synthesis-waiting",
+              id: "judgment-waiting",
               messageType: "debate_judgment" as const,
               title: "判定待ち",
               label: "ユーザーが判定指示を出すまで保留",
