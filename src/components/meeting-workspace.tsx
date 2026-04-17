@@ -150,6 +150,13 @@ type TimelineEntry = {
   side?: "left" | "right";
 };
 
+type SummarySection = {
+  title: string;
+  tone: string;
+  items?: string[];
+  body?: string;
+};
+
 function formatTimestamp(isoTimestamp: string) {
   return new Intl.DateTimeFormat("ja-JP", {
     hour: "2-digit",
@@ -283,6 +290,24 @@ export function MeetingWorkspace() {
     "推奨案",
     result.synthesis.recommendation,
   ].join("\n");
+
+  const synthesisSections: SummarySection[] = [
+    {
+      title: "合意事項",
+      tone: "border-orange-200 bg-orange-50/85",
+      items: result.synthesis.agreements,
+    },
+    {
+      title: "未決事項",
+      tone: "border-sky-200 bg-sky-50/85",
+      items: result.synthesis.openQuestions,
+    },
+    {
+      title: "推奨案",
+      tone: "border-violet-200 bg-violet-50/90",
+      body: result.synthesis.recommendation,
+    },
+  ];
 
   const timelineEntries: TimelineEntry[] = [
     {
@@ -453,8 +478,48 @@ export function MeetingWorkspace() {
                         isUser ? "text-white/92" : "text-zinc-700"
                       }`}
                     >
-                      {entry.body}
+                      {entry.messageType === "synthesis" && hasSynthesis ? null : entry.body}
                     </p>
+
+                    {entry.messageType === "synthesis" && hasSynthesis ? (
+                      <div className="mt-4 space-y-3">
+                        <div className="rounded-2xl border border-violet-200 bg-white/75 px-4 py-3">
+                          <div className="text-xs font-mono uppercase tracking-[0.18em] text-violet-500">
+                            synthesis note
+                          </div>
+                          <p className="mt-2 text-sm leading-7 text-zinc-700">
+                            ユーザーの明示指示を受けて、ここまでの議論を整理した結果です。
+                          </p>
+                        </div>
+
+                        <div className="grid gap-3">
+                          {synthesisSections.map((section) => (
+                            <section
+                              key={section.title}
+                              className={`rounded-2xl border px-4 py-3 ${section.tone}`}
+                            >
+                              <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-500">
+                                {section.title}
+                              </div>
+                              {section.items ? (
+                                <ul className="mt-2 space-y-2 text-sm leading-7 text-zinc-700">
+                                  {section.items.map((item) => (
+                                    <li key={item} className="flex gap-3">
+                                      <span className="mt-2 h-2 w-2 rounded-full bg-zinc-500/60" />
+                                      <span>{item}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="mt-2 text-sm leading-7 text-zinc-700">
+                                  {section.body}
+                                </p>
+                              )}
+                            </section>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
 
                     {entry.meta ? (
                       <div
@@ -687,39 +752,58 @@ export function MeetingWorkspace() {
                   ))}
                 </div>
               ) : hasSynthesis ? (
-                <div className="mt-3 space-y-4 text-sm leading-7 text-zinc-700">
-                  <div>
-                    <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
-                      合意事項
+                <div className="mt-3 space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-2xl border border-orange-200 bg-orange-50/80 px-3 py-3">
+                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-orange-700">
+                        agreements
+                      </div>
+                      <div className="mt-2 text-2xl font-semibold text-orange-950">
+                        {result.synthesis.agreements.length}
+                      </div>
                     </div>
-                    <ul className="mt-2 space-y-2">
-                      {result.synthesis.agreements.map((item) => (
-                        <li key={item} className="flex gap-3">
-                          <span className="mt-2 h-2 w-2 rounded-full bg-orange-500" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
-                      未決事項
+                    <div className="rounded-2xl border border-sky-200 bg-sky-50/80 px-3 py-3">
+                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-sky-700">
+                        open points
+                      </div>
+                      <div className="mt-2 text-2xl font-semibold text-sky-950">
+                        {result.synthesis.openQuestions.length}
+                      </div>
                     </div>
-                    <ul className="mt-2 space-y-2">
-                      {result.synthesis.openQuestions.map((item) => (
-                        <li key={item} className="flex gap-3">
-                          <span className="mt-2 h-2 w-2 rounded-full bg-sky-500" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
-                      推奨案
+                    <div className="rounded-2xl border border-violet-200 bg-violet-50/80 px-3 py-3">
+                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-violet-700">
+                        status
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-violet-950">
+                        ready
+                      </div>
                     </div>
-                    <p className="mt-2">{result.synthesis.recommendation}</p>
                   </div>
+
+                  {synthesisSections.map((section) => (
+                    <section
+                      key={section.title}
+                      className={`rounded-2xl border px-4 py-4 ${section.tone}`}
+                    >
+                      <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-500">
+                        {section.title}
+                      </div>
+                      {section.items ? (
+                        <ul className="mt-2 space-y-2 text-sm leading-7 text-zinc-700">
+                          {section.items.map((item) => (
+                            <li key={item} className="flex gap-3">
+                              <span className="mt-2 h-2 w-2 rounded-full bg-zinc-500/60" />
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-sm leading-7 text-zinc-700">
+                          {section.body}
+                        </p>
+                      )}
+                    </section>
+                  ))}
                 </div>
               ) : (
                 <ul className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
