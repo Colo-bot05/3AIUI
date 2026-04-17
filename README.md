@@ -11,6 +11,10 @@
 - PostgreSQL コンテナの初期定義
 - GitHub Actions の CI
 
+## Status
+
+MVP の進行状況、直近の主要変更、未実装項目、次アクションは [`docs/STATUS.md`](docs/STATUS.md) にまとめています。README は setup 手順中心に保ち、進捗メモはそちらを正とします。
+
 ## Tech Stack
 
 - Next.js
@@ -21,7 +25,7 @@
 
 ## Directory Outline
 
-```text
+```
 src/
   app/
     api/meeting/run/route.ts   # 会議実行API（今はモック）
@@ -49,7 +53,7 @@ DATABASE_URL=postgresql://postgres:postgres@db:5432/three_ai_ui
 MEETING_PROVIDER=mock
 ```
 
-今のMVPでは `MEETING_PROVIDER=mock` を前提にしています。会議実行APIは provider adapter 経由で mock を呼ぶ構造になっており、将来的にはここに商用LLMやローカルLLMの adapter を追加して差し替える想定です。
+現在のMVPでは `MEETING_PROVIDER=mock` を前提にしており、会議実行APIは provider adapter経由でモックを実行する構造になっています。将来的には商用LLMやローカルLLMのアダプターを追加する予定です。
 
 ## Local Development
 
@@ -60,7 +64,7 @@ npm install
 npm run dev
 ```
 
-ブラウザで [http://localhost:3000](http://localhost:3000) を開いてください。
+ブラウザで http://localhost:3000 を開いてください。
 
 ## Docker Desktop で起動する
 
@@ -73,7 +77,7 @@ docker compose up --build
 
 起動後のアクセス先:
 
-- App: [http://localhost:3000](http://localhost:3000)
+- App: http://localhost:3000
 - PostgreSQL: `localhost:5432`
 
 この構成は、ローカルでは bind mount で開発しやすくしつつ、将来的に ECS Fargate へ寄せやすい「コンテナ前提」の土台を意識しています。
@@ -99,8 +103,4 @@ npm run build
 
 ## Next Steps
 
-このPRの次に進めやすい候補:
-
-1. orchestrator のレスポンス設計を少し拡張し、実LLM差し替え口を明確化する
-2. セッション保存のスキーマと repository 層を追加する
-3. UI のストリーミング表現や markdown 表示を整える
+直近の候補は [`docs/STATUS.md`](docs/STATUS.md) の「現時点のおすすめ次アクション」を参照してください。
