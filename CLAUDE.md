@@ -72,6 +72,10 @@ PR を作った直後に、次を自分でやる。
 - merge conflict: `git fetch && git rebase origin/main` で解決。解決できなければ Cowork に相談。
 - 指示書の Acceptance Criteria を満たせないと判明した: すぐ PR を draft に戻し、PR 本文に「⚠️ 要再設計: <理由>」と書いて Cowork に返す。
 
+## 6.5 出力量のルール
+
+進捗ナレーション・段階説明・長い要約は不要。セッション中の返答は、必要な確認質問 と 最後の `[result]` ブロック のみに絞る。コマンド実行ログは CI 失敗時のみ最小限に貼る。
+
 ## 7. Cowork との通信プロトコル
 
 Claude Code からユーザー（Cowork を使っている本人）に返す報告は、次の形式に揃える。
