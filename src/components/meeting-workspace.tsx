@@ -3,9 +3,15 @@
 import { useState } from "react";
 
 import { MODE_OPTIONS } from "@/features/meeting/mode-config";
-import type { MeetingMode, MeetingRunResult } from "@/features/meeting/types";
+import type {
+  MeetingMessageType,
+  MeetingMode,
+  MeetingRunResult,
+  SpeakerRole,
+} from "@/features/meeting/types";
 
-const DEFAULT_THEME = "商用LLMを使って、ローカルLLM構築の設計議論を加速するMVPを考えたい";
+const DEFAULT_THEME =
+  "商用LLMを使って、ローカルLLM構築の設計議論を加速するMVPを考えたい";
 
 const INITIAL_RESULT: MeetingRunResult = {
   theme: DEFAULT_THEME,
@@ -54,10 +60,80 @@ const INITIAL_RESULT: MeetingRunResult = {
 };
 
 const ROLE_STYLES = {
-  vision: "from-orange-100 to-amber-50 border-orange-200",
-  reality: "from-sky-100 to-cyan-50 border-sky-200",
-  audit: "from-emerald-100 to-teal-50 border-emerald-200",
+  vision: {
+    bubble: "border-orange-200 bg-orange-50/90",
+    marker: "bg-orange-500",
+    accent: "text-orange-900",
+    model: "GPT",
+  },
+  reality: {
+    bubble: "border-sky-200 bg-sky-50/90",
+    marker: "bg-sky-500",
+    accent: "text-sky-900",
+    model: "Gemini",
+  },
+  audit: {
+    bubble: "border-emerald-200 bg-emerald-50/90",
+    marker: "bg-emerald-500",
+    accent: "text-emerald-900",
+    model: "Claude",
+  },
 } as const;
+
+const PANEL_PLACEHOLDERS = {
+  brainstorm: {
+    heading: "発散メモ",
+    items: [
+      "アイデア一覧は統合指示後に表示",
+      "有望案の抽出はまだ未実行",
+      "補足観点は次の整理待ち",
+    ],
+    note: "ユーザーが「統合して」「ここまでで整理して」と指示するまで、発散中の表示を維持します。",
+  },
+  design_review: {
+    heading: "論点メモ",
+    items: [
+      "合意事項はまだ未確定",
+      "未決事項は議論の進行に応じて整理",
+      "懸念点と次アクションは後続PRで連動予定",
+    ],
+    note: "ディスカッションでは、ユーザーの整理指示があるまで議論中の状態を保つ前提です。",
+  },
+  debate: {
+    heading: "判定メモ",
+    items: [
+      "賛成側・反対側・審判の割当UIは次PRで接続",
+      "判定結果はまだ未実行",
+      "残る論点の整理だけを表示枠として先置き",
+    ],
+    note: "このPRではレイアウトだけを先に作り、判定ロジックや役割制約は実装しません。",
+  },
+} as const;
+
+const DEBATE_ROLE_PLACEHOLDERS = [
+  { label: "賛成側AI", value: "GPT", helper: "次PRで動的割当" },
+  { label: "反対側AI", value: "Gemini", helper: "次PRで重複禁止" },
+  { label: "審判AI", value: "Claude", helper: "次PRで判定待ち制御" },
+];
+
+type TimelineEntry = {
+  id: string;
+  messageType: MeetingMessageType;
+  title: string;
+  label: string;
+  accentClass: string;
+  markerClass: string;
+  body: string;
+  meta?: string;
+  side?: "left" | "right";
+};
+
+function formatTimestamp(isoTimestamp: string) {
+  return new Intl.DateTimeFormat("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(isoTimestamp));
+}
 
 export function MeetingWorkspace() {
   const [theme, setTheme] = useState(DEFAULT_THEME);
@@ -96,169 +172,365 @@ export function MeetingWorkspace() {
     }
   }
 
+  const activeMode = MODE_OPTIONS.find((option) => option.value === mode) ?? MODE_OPTIONS[1];
+  const activePlaceholder = PANEL_PLACEHOLDERS[mode];
+
+  const timelineEntries: TimelineEntry[] = [
+    {
+      id: "status",
+      messageType: "system_status",
+      title: "ワークスペース状態",
+      label: activeMode.timelineStatus,
+      accentClass: "text-zinc-700",
+      markerClass: "bg-zinc-400",
+      body:
+        mode === "brainstorm"
+          ? "3AI はまだ結論を固定せず、案を広げる前提の表示です。統合メッセージはまだ生成していません。"
+          : mode === "debate"
+            ? "賛成・反対・審判の会話フローを表示するためのレイアウトです。判定はまだ実行していません。"
+            : "3AI が順番に論点を深掘りする想定の表示です。合意や統合はまだ確定していません。",
+      meta: "system_status",
+    },
+    {
+      id: "user-theme",
+      messageType: "user",
+      title: "ユーザー",
+      label: "テーマ投稿",
+      accentClass: "text-zinc-950",
+      markerClass: "bg-zinc-950",
+      body: theme,
+      meta: `mode: ${activeMode.label}`,
+      side: "right",
+    },
+    ...result.responses.map((response, index) => ({
+      id: response.role,
+      messageType: "ai_message" as const,
+      title: response.label,
+      label: response.viewpoint,
+      accentClass: ROLE_STYLES[response.role].accent,
+      markerClass: ROLE_STYLES[response.role].marker,
+      body: response.content,
+      meta: `${ROLE_STYLES[response.role].model} / turn ${index + 1}`,
+    })),
+    {
+      id: "synthesis-waiting",
+      messageType: mode === "debate" ? "debate_judgment" : "synthesis",
+      title: mode === "debate" ? "判定待ち" : "統合待ち",
+      label:
+        mode === "debate"
+          ? "ユーザーが判定指示を出すまで保留"
+          : "ユーザーが整理指示を出すまで保留",
+      accentClass: "text-violet-900",
+      markerClass: "bg-violet-500",
+      body:
+        mode === "debate"
+          ? "この位置に最終判定メッセージが入る想定です。今回はレイアウトのみで、勝敗や推奨結論はまだ生成しません。"
+          : "この位置に統合メッセージが入る想定です。今回はレイアウトのみで、要約や推奨案はプレースホルダー表示にしています。",
+      meta:
+        mode === "debate"
+          ? "debate_judgment placeholder"
+          : "synthesis placeholder",
+    },
+  ];
+
   return (
-    <div className="flex flex-col gap-6 pb-8">
+    <div className="grid gap-6 pb-8 xl:grid-cols-[minmax(0,1.35fr)_380px]">
       <section className="glass-panel grid-pattern overflow-hidden rounded-[2rem]">
-        <div className="grid gap-8 px-6 py-8 sm:px-8 lg:grid-cols-[1.4fr_0.9fr] lg:px-10 lg:py-10">
-          <div className="space-y-5">
-            <span className="section-title">3AI Meeting UI / MVP</span>
+        <div className="border-b border-zinc-900/10 px-6 py-6 sm:px-8">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="space-y-3">
-              <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.04em] text-zinc-950 sm:text-5xl">
-                1つのテーマを、3つの視点で議論し、最後に統合結論まで導く。
+              <span className="section-title">3AI Group Chat Workspace</span>
+              <h1 className="max-w-4xl text-4xl font-semibold tracking-[-0.04em] text-zinc-950 sm:text-5xl">
+                3AI が会話し、ユーザーが必要なタイミングで整理を指示する。
               </h1>
-              <p className="max-w-2xl text-base leading-8 text-zinc-600 sm:text-lg">
-                構想AI・現実AI・監査AIがそれぞれ異なる役割で発言し、最後に合意事項と未決事項、
-                推奨案をまとめるMVPです。初回はモック実装ですが、後から商用LLMやローカルLLMへ差し替えやすい形にしています。
+              <p className="max-w-3xl text-base leading-8 text-zinc-600 sm:text-lg">
+                3AI を比較するのではなく、ひとつのテーマをめぐって役割付きで会話するワークスペースです。
+                このPRではタイムライン型レイアウトを先に整え、統合や判定の本ロジックはまだ載せません。
               </p>
             </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <span
+                className={`rounded-full border px-4 py-2 text-sm font-semibold ${activeMode.panelTone}`}
+              >
+                {activeMode.label} / {activeMode.timelineStatus}
+              </span>
+              <span className="rounded-full border border-zinc-900/10 bg-white/80 px-4 py-2 text-sm text-zinc-600">
+                mock conversation
+              </span>
+            </div>
           </div>
+        </div>
 
-          <div className="rounded-[1.75rem] border border-zinc-900/10 bg-white/75 p-5 shadow-[0_18px_50px_rgba(25,25,25,0.09)]">
-            <div className="space-y-5">
-              <div>
-                <p className="section-title">Theme</p>
-                <textarea
-                  value={theme}
-                  onChange={(event) => setTheme(event.target.value)}
-                  rows={4}
-                  className="mt-2 w-full resize-none rounded-2xl border border-zinc-900/10 bg-white px-4 py-3 text-sm leading-7 text-zinc-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
-                  placeholder="議論したいテーマを入力"
-                />
-              </div>
+        <div className="px-4 py-6 sm:px-6 lg:px-8">
+          <div className="timeline-rail space-y-5">
+            {timelineEntries.map((entry) => {
+              const isUser = entry.side === "right";
+              const isSystem = entry.messageType === "system_status";
+              const isSummaryPlaceholder =
+                entry.messageType === "synthesis" ||
+                entry.messageType === "debate_judgment";
 
-              <div>
-                <p className="section-title">Mode</p>
-                <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                  {MODE_OPTIONS.map((option) => {
-                    const active = option.value === mode;
+              return (
+                <article
+                  key={entry.id}
+                  className={`relative flex gap-4 ${isUser ? "justify-end" : "justify-start"}`}
+                >
+                  {!isUser ? (
+                    <div
+                      className={`relative z-10 mt-3 h-4 w-4 shrink-0 rounded-full border-4 border-[#f7f0e6] ${entry.markerClass}`}
+                    />
+                  ) : null}
 
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => setMode(option.value)}
-                        className={`rounded-2xl border px-3 py-3 text-left transition ${
-                          active
-                            ? "border-orange-500 bg-orange-50 text-zinc-950 shadow-sm"
-                            : "border-zinc-900/10 bg-white text-zinc-500 hover:border-zinc-900/20 hover:bg-zinc-50"
+                  <div
+                    className={`max-w-[90%] rounded-[1.6rem] border px-5 py-4 shadow-[0_18px_40px_rgba(25,25,25,0.06)] sm:max-w-[78%] ${
+                      isSystem
+                        ? "border-zinc-900/10 bg-white/70"
+                        : isSummaryPlaceholder
+                          ? "border-violet-200 bg-violet-50/85"
+                          : isUser
+                            ? "border-zinc-900/10 bg-zinc-950 text-white"
+                            : ROLE_STYLES[entry.id as SpeakerRole]?.bubble ??
+                              "border-white/60 bg-white/80"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`text-sm font-semibold ${
+                          isUser
+                            ? "text-white"
+                            : isSummaryPlaceholder
+                              ? "text-violet-950"
+                              : entry.accentClass
                         }`}
                       >
-                        <div className="text-sm font-semibold">{option.label}</div>
-                        <div className="mt-1 text-xs leading-5">{option.description}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                        {entry.title}
+                      </span>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-mono ${
+                          isUser
+                            ? "border-white/20 bg-white/10 text-white/80"
+                            : isSummaryPlaceholder
+                              ? "border-violet-200 bg-white/60 text-violet-700"
+                              : "border-zinc-900/10 bg-white/75 text-zinc-500"
+                        }`}
+                      >
+                        {entry.label}
+                      </span>
+                    </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <button
-                  type="button"
-                  onClick={handleRun}
-                  disabled={loading}
-                  className="inline-flex items-center justify-center rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
-                >
-                  {loading ? "会議を生成中..." : "3AI会議を実行"}
-                </button>
-                <p className="text-xs leading-6 text-zinc-500">
-                  API層はモック実装です。後から Provider Adapter を差し込めるように分離しています。
-                </p>
-              </div>
+                    <p
+                      className={`mt-3 rich-text text-sm ${
+                        isUser ? "text-white/92" : "text-zinc-700"
+                      }`}
+                    >
+                      {entry.body}
+                    </p>
 
-              {error ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  {error}
-                </div>
-              ) : null}
-            </div>
+                    {entry.meta ? (
+                      <div
+                        className={`mt-4 text-[11px] font-mono uppercase tracking-[0.18em] ${
+                          isUser ? "text-white/60" : "text-zinc-400"
+                        }`}
+                      >
+                        {entry.meta}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {isUser ? (
+                    <div className="relative z-10 mt-3 h-4 w-4 shrink-0 rounded-full border-4 border-[#f7f0e6] bg-zinc-950" />
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.45fr_0.9fr]">
+      <aside className="glass-panel rounded-[2rem] p-5 sm:p-6 xl:sticky xl:top-8 xl:self-start">
         <div className="space-y-6">
-          <div className="flex items-end justify-between">
+          <section className="space-y-4">
             <div>
-              <p className="section-title">Discussion</p>
+              <p className="section-title">Control Panel</p>
               <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-zinc-950">
-                3AI の発言
-              </h2>
-            </div>
-            <p className="text-xs text-zinc-500">
-              Theme: <span className="font-medium text-zinc-700">{result.theme}</span>
-            </p>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            {result.responses.map((response) => (
-              <article
-                key={response.role}
-                className={`rounded-[1.5rem] border bg-gradient-to-b p-5 shadow-[0_18px_40px_rgba(25,25,25,0.06)] ${ROLE_STYLES[response.role]}`}
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="section-title">{response.label}</p>
-                      <h3 className="mt-2 text-lg font-semibold text-zinc-950">
-                        {response.viewpoint}
-                      </h3>
-                    </div>
-                    <span className="rounded-full border border-zinc-900/10 bg-white/80 px-3 py-1 font-mono text-[11px] text-zinc-600">
-                      {response.emphasis}
-                    </span>
-                  </div>
-                  <p className="rich-text text-sm text-zinc-700">{response.content}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        <aside className="glass-panel rounded-[1.75rem] p-6">
-          <div className="space-y-6">
-            <div>
-              <p className="section-title">Synthesis</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-zinc-950">
-                統合結果
+                会話コントロール
               </h2>
               <p className="mt-2 text-sm leading-7 text-zinc-600">
-                3つの視点を受けて、合意事項・未決事項・推奨案をひと目で確認できます。
+                右パネルは操作と状態確認の置き場です。今回のPRでは要約値や状態値はプレースホルダー表示です。
               </p>
             </div>
 
-            <section className="rounded-[1.5rem] border border-zinc-900/10 bg-white/70 p-5">
-              <h3 className="text-sm font-semibold text-zinc-950">合意事項</h3>
-              <ul className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
-                {result.synthesis.agreements.map((agreement) => (
-                  <li key={agreement} className="flex gap-3">
-                    <span className="mt-2 h-2 w-2 rounded-full bg-orange-500" />
-                    <span>{agreement}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            <div>
+              <p className="section-title">Theme</p>
+              <textarea
+                value={theme}
+                onChange={(event) => setTheme(event.target.value)}
+                rows={4}
+                className="mt-2 w-full resize-none rounded-2xl border border-zinc-900/10 bg-white px-4 py-3 text-sm leading-7 text-zinc-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
+                placeholder="議論したいテーマを入力"
+              />
+            </div>
 
-            <section className="rounded-[1.5rem] border border-zinc-900/10 bg-white/70 p-5">
-              <h3 className="text-sm font-semibold text-zinc-950">未決事項</h3>
-              <ul className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
-                {result.synthesis.openQuestions.map((question) => (
-                  <li key={question} className="flex gap-3">
-                    <span className="mt-2 h-2 w-2 rounded-full bg-sky-500" />
-                    <span>{question}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            <div>
+              <p className="section-title">Mode</p>
+              <div className="mt-2 grid gap-2">
+                {MODE_OPTIONS.map((option) => {
+                  const active = option.value === mode;
 
-            <section className="rounded-[1.5rem] border border-orange-200 bg-orange-50/80 p-5">
-              <h3 className="text-sm font-semibold text-zinc-950">推奨案</h3>
-              <p className="mt-3 text-sm leading-7 text-zinc-700">
-                {result.synthesis.recommendation}
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setMode(option.value)}
+                      className={`rounded-2xl border px-4 py-3 text-left transition ${
+                        active
+                          ? "border-zinc-950 bg-zinc-950 text-white shadow-sm"
+                          : "border-zinc-900/10 bg-white text-zinc-600 hover:border-zinc-900/20 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold">{option.label}</div>
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-mono ${
+                            active
+                              ? "border-white/20 bg-white/10 text-white/80"
+                              : option.panelTone
+                          }`}
+                        >
+                          {option.timelineStatus}
+                        </span>
+                      </div>
+                      <div
+                        className={`mt-1 text-xs leading-5 ${
+                          active ? "text-white/75" : ""
+                        }`}
+                      >
+                        {option.description}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {mode === "debate" ? (
+              <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-zinc-950">
+                    ディベート役割表示
+                  </h3>
+                  <span className="rounded-full border border-zinc-900/10 bg-zinc-100 px-2.5 py-1 text-[11px] font-mono text-zinc-600">
+                    placeholder
+                  </span>
+                </div>
+                <div className="mt-3 space-y-3">
+                  {DEBATE_ROLE_PLACEHOLDERS.map((role) => (
+                    <div
+                      key={role.label}
+                      className="rounded-2xl border border-zinc-900/10 bg-white px-3 py-3"
+                    >
+                      <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-400">
+                        {role.label}
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-zinc-900">
+                        {role.value}
+                      </div>
+                      <div className="mt-1 text-xs leading-5 text-zinc-500">
+                        {role.helper}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={handleRun}
+                disabled={loading}
+                className="inline-flex items-center justify-center rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+              >
+                {loading ? "会話を更新中..." : "会話を表示更新"}
+              </button>
+              <p className="text-xs leading-6 text-zinc-500">
+                今回のPRでは表示構造のみを整えています。統合・判定ロジックや会話状態遷移は次のPRで実装します。
               </p>
-            </section>
-          </div>
-        </aside>
-      </section>
+            </div>
+
+            {error ? (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {error}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="space-y-4">
+            <div>
+              <p className="section-title">Status & Summary</p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-zinc-950">
+                右サイド要約
+              </h2>
+              <p className="mt-2 text-sm leading-7 text-zinc-600">
+                ここは最終的に合意事項や判定を集約する場所です。今はレイアウトだけ先に用意しています。
+              </p>
+            </div>
+
+            <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-zinc-950">現在状態</h3>
+                <span
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeMode.panelTone}`}
+                >
+                  {activeMode.timelineStatus}
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-7 text-zinc-600">
+                表示上は現在状態を示していますが、内部の状態遷移はまだ実装していません。
+              </p>
+            </div>
+
+            <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
+              <h3 className="text-sm font-semibold text-zinc-950">
+                {activePlaceholder.heading}
+              </h3>
+              <ul className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
+                {activePlaceholder.items.map((item) => (
+                  <li key={item} className="flex gap-3">
+                    <span className="mt-2 h-2 w-2 rounded-full bg-zinc-400" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="rounded-[1.5rem] border border-dashed border-zinc-300 bg-zinc-50/80 p-4">
+              <h3 className="text-sm font-semibold text-zinc-950">
+                次の実装でつなぐもの
+              </h3>
+              <p className="mt-3 text-sm leading-7 text-zinc-600">
+                {activePlaceholder.note}
+              </p>
+              <div className="mt-4 text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-400">
+                placeholder only / no real synthesis
+              </div>
+            </div>
+
+            <div className="rounded-[1.5rem] border border-zinc-900/10 bg-zinc-950 p-4 text-white">
+              <div className="text-xs font-mono uppercase tracking-[0.18em] text-white/55">
+                Last mock refresh
+              </div>
+              <div className="mt-2 text-lg font-semibold">
+                {formatTimestamp(result.generatedAt)}
+              </div>
+              <div className="mt-2 text-sm leading-7 text-white/72">
+                現在は mock provider で返した発言をタイムラインに並べています。統合結果はまだ自動確定しません。
+              </div>
+            </div>
+          </section>
+        </div>
+      </aside>
     </div>
   );
 }
