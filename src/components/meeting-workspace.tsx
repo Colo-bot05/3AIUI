@@ -7,6 +7,7 @@ import {
   buildConversationStateSnapshot,
   getAllowedStatesForMode,
   getInitialConversationState,
+  isExplicitJudgmentTrigger,
   isExplicitSynthesisTrigger,
 } from "@/features/meeting/state";
 import type {
@@ -164,6 +165,14 @@ function formatTimestamp(isoTimestamp: string) {
   }).format(new Date(isoTimestamp));
 }
 
+function pickModelLabel(value: DebateModel | "") {
+  return DEBATE_MODELS.find((item) => item.value === value)?.label ?? "未選択";
+}
+
+function extractLeadPoint(content: string) {
+  return content.split("\n\n")[0] ?? content;
+}
+
 export function MeetingWorkspace() {
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [submittedPrompt, setSubmittedPrompt] = useState(DEFAULT_THEME);
@@ -194,6 +203,7 @@ export function MeetingWorkspace() {
   async function handleRun() {
     const trimmedInput = theme.trim();
     const isSynthesisRequest = isExplicitSynthesisTrigger(trimmedInput, mode);
+    const isJudgmentRequest = isExplicitJudgmentTrigger(trimmedInput, mode);
 
     if (mode === "debate") {
       setSubmittedPrompt(trimmedInput || DEFAULT_THEME);
@@ -205,6 +215,17 @@ export function MeetingWorkspace() {
 
       if (hasDuplicateDebateAssignments) {
         setError("同じAIを複数のディベート役割に割り当てることはできません。");
+        return;
+      }
+
+      if (isJudgmentRequest) {
+        if (lastDiscussionMode !== "debate") {
+          setError("先にディベートを開始してから判定してください。");
+          return;
+        }
+
+        setError(null);
+        setConversationState("judged");
         return;
       }
     }
@@ -246,7 +267,7 @@ export function MeetingWorkspace() {
         mode === "brainstorm"
           ? "brainstorming"
           : mode === "debate"
-            ? "debating"
+            ? "awaiting_judgment"
             : "discussing",
       );
     } catch (nextError) {
@@ -268,16 +289,11 @@ export function MeetingWorkspace() {
   const activePlaceholder = PANEL_PLACEHOLDERS[mode];
   const hasSynthesis =
     mode !== "debate" && conversationState === "synthesized";
+  const hasJudgment = mode === "debate" && conversationState === "judged";
   const debateAssignmentSummary = [
-    `${DEBATE_ROLE_LABELS.pro}: ${
-      DEBATE_MODELS.find((item) => item.value === debateAssignments.pro)?.label ?? "未選択"
-    }`,
-    `${DEBATE_ROLE_LABELS.con}: ${
-      DEBATE_MODELS.find((item) => item.value === debateAssignments.con)?.label ?? "未選択"
-    }`,
-    `${DEBATE_ROLE_LABELS.judge}: ${
-      DEBATE_MODELS.find((item) => item.value === debateAssignments.judge)?.label ?? "未選択"
-    }`,
+    `${DEBATE_ROLE_LABELS.pro}: ${pickModelLabel(debateAssignments.pro)}`,
+    `${DEBATE_ROLE_LABELS.con}: ${pickModelLabel(debateAssignments.con)}`,
+    `${DEBATE_ROLE_LABELS.judge}: ${pickModelLabel(debateAssignments.judge)}`,
   ].join("\n");
 
   const synthesisBody = [
@@ -306,6 +322,44 @@ export function MeetingWorkspace() {
       title: "推奨案",
       tone: "border-violet-200 bg-violet-50/90",
       body: result.synthesis.recommendation,
+    },
+  ];
+
+  const debateJudgmentSections: SummarySection[] = [
+    {
+      title: "賛成側の要点",
+      tone: "border-orange-200 bg-orange-50/85",
+      items: [
+        `${pickModelLabel(debateAssignments.pro)}: ${extractLeadPoint(result.responses[0]?.content ?? "")}`,
+      ],
+    },
+    {
+      title: "反対側の要点",
+      tone: "border-sky-200 bg-sky-50/85",
+      items: [
+        `${pickModelLabel(debateAssignments.con)}: ${extractLeadPoint(result.responses[1]?.content ?? "")}`,
+      ],
+    },
+    {
+      title: "判定",
+      tone: "border-emerald-200 bg-emerald-50/90",
+      body: `${pickModelLabel(
+        debateAssignments.judge,
+      )} の暫定判断として、現時点では「追加検証付きで賛成側の方向を前進させる」が妥当です。`,
+    },
+    {
+      title: "判定理由",
+      tone: "border-violet-200 bg-violet-50/90",
+      body: "賛成側は前進案を示し、反対側はリスク整理を提供しているため、結論を止めるより条件付きで進める方が意思決定しやすい状態です。",
+    },
+    {
+      title: "残る論点",
+      tone: "border-zinc-200 bg-zinc-50/90",
+      items: [
+        "追加検証をどの指標で判定するか",
+        "ローカルLLM構築コストの見積精度",
+        "商用LLM依存をどこまで許容するか",
+      ],
     },
   ];
 
@@ -348,18 +402,38 @@ export function MeetingWorkspace() {
       meta: `${ROLE_STYLES[response.role].model} / turn ${index + 1}`,
     })),
     ...(mode === "debate"
-      ? [
-          {
-            id: "synthesis-waiting",
-            messageType: "debate_judgment" as const,
-            title: "判定待ち",
-            label: "ユーザーが判定指示を出すまで保留",
-            accentClass: "text-violet-900",
-            markerClass: "bg-violet-500",
-            body: "この位置に最終判定メッセージが入る想定です。今回はレイアウトのみで、勝敗や推奨結論はまだ生成しません。",
-            meta: "debate_judgment placeholder",
-          },
-        ]
+      ? hasJudgment
+        ? [
+            {
+              id: "debate-judgment",
+              messageType: "debate_judgment" as const,
+              title: "判定結果",
+              label: "ユーザー明示指示で生成",
+              accentClass: "text-violet-900",
+              markerClass: "bg-violet-500",
+              body: [
+                "判定",
+                `${pickModelLabel(debateAssignments.judge)} の暫定判断: 追加検証付きで賛成側案を前進`,
+                "",
+                "次に確認すべきこと",
+                "- 追加検証の評価基準",
+                "- 実装コストと依存範囲",
+              ].join("\n"),
+              meta: "debate_judgment / explicit trigger",
+            },
+          ]
+        : [
+            {
+              id: "synthesis-waiting",
+              messageType: "debate_judgment" as const,
+              title: "判定待ち",
+              label: "ユーザーが判定指示を出すまで保留",
+              accentClass: "text-violet-900",
+              markerClass: "bg-violet-500",
+              body: "この位置に最終判定メッセージが入る想定です。ユーザーが明示的に判定を依頼するまで、審判AIは結論を固定しません。",
+              meta: "debate_judgment placeholder",
+            },
+          ]
       : hasSynthesis
         ? [
             {
@@ -481,19 +555,27 @@ export function MeetingWorkspace() {
                       {entry.messageType === "synthesis" && hasSynthesis ? null : entry.body}
                     </p>
 
-                    {entry.messageType === "synthesis" && hasSynthesis ? (
+                    {(entry.messageType === "synthesis" && hasSynthesis) ||
+                    (entry.messageType === "debate_judgment" && hasJudgment) ? (
                       <div className="mt-4 space-y-3">
                         <div className="rounded-2xl border border-violet-200 bg-white/75 px-4 py-3">
                           <div className="text-xs font-mono uppercase tracking-[0.18em] text-violet-500">
-                            synthesis note
+                            {entry.messageType === "synthesis"
+                              ? "synthesis note"
+                              : "judgment note"}
                           </div>
                           <p className="mt-2 text-sm leading-7 text-zinc-700">
-                            ユーザーの明示指示を受けて、ここまでの議論を整理した結果です。
+                            {entry.messageType === "synthesis"
+                              ? "ユーザーの明示指示を受けて、ここまでの議論を整理した結果です。"
+                              : "ユーザーの明示指示を受けて、ここまでのディベートを審判観点で整理した結果です。"}
                           </p>
                         </div>
 
                         <div className="grid gap-3">
-                          {synthesisSections.map((section) => (
+                          {(entry.messageType === "synthesis"
+                            ? synthesisSections
+                            : debateJudgmentSections
+                          ).map((section) => (
                             <section
                               key={section.title}
                               className={`rounded-2xl border px-4 py-3 ${section.tone}`}
@@ -732,7 +814,61 @@ export function MeetingWorkspace() {
 
             <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
               <h3 className="text-sm font-semibold text-zinc-950">{activePlaceholder.heading}</h3>
-              {mode === "debate" ? (
+              {mode === "debate" && hasJudgment ? (
+                <div className="mt-3 space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-3 py-3">
+                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-emerald-700">
+                        judgment
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-emerald-950">
+                        ready
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-orange-200 bg-orange-50/80 px-3 py-3">
+                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-orange-700">
+                        pro
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-orange-950">
+                        {pickModelLabel(debateAssignments.pro)}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-sky-200 bg-sky-50/80 px-3 py-3">
+                      <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-sky-700">
+                        con
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-sky-950">
+                        {pickModelLabel(debateAssignments.con)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {debateJudgmentSections.map((section) => (
+                    <section
+                      key={section.title}
+                      className={`rounded-2xl border px-4 py-4 ${section.tone}`}
+                    >
+                      <div className="text-xs font-mono uppercase tracking-[0.18em] text-zinc-500">
+                        {section.title}
+                      </div>
+                      {section.items ? (
+                        <ul className="mt-2 space-y-2 text-sm leading-7 text-zinc-700">
+                          {section.items.map((item) => (
+                            <li key={item} className="flex gap-3">
+                              <span className="mt-2 h-2 w-2 rounded-full bg-zinc-500/60" />
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-sm leading-7 text-zinc-700">
+                          {section.body}
+                        </p>
+                      )}
+                    </section>
+                  ))}
+                </div>
+              ) : mode === "debate" ? (
                 <div className="mt-3 space-y-3 text-sm leading-7 text-zinc-700">
                   {(Object.keys(DEBATE_ROLE_LABELS) as DebateRole[]).map((role) => (
                     <div key={role} className="flex items-start justify-between gap-4 rounded-2xl border border-zinc-900/10 bg-zinc-50 px-3 py-3">
@@ -823,14 +959,18 @@ export function MeetingWorkspace() {
               </h3>
               <p className="mt-3 text-sm leading-7 text-zinc-600">
                 {mode === "debate"
-                  ? "次のPRで、審判AIの判定トリガーと判定メッセージ生成を追加します。"
+                  ? hasJudgment
+                    ? "今回はユーザーの明示指示で判定結果を表示できるようになりました。次のPRでは debate の会話段階をさらに細かく分けます。"
+                    : "ユーザーが「判定して」「結論を出して」と指示した時だけ判定結果を表示する前提です。"
                   : hasSynthesis
                   ? "今回は明示トリガーで統合メッセージを出せるようになりました。次のPRで trigger 判定の精度や会話履歴前提の整理を広げます。"
                   : activePlaceholder.note}
               </p>
               <div className="mt-4 text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-400">
                 {mode === "debate"
-                  ? "debate role assignment ready"
+                  ? hasJudgment
+                    ? "explicit judgment completed"
+                    : "waiting for explicit judgment request"
                   : hasSynthesis
                   ? "explicit synthesis completed"
                   : "waiting for explicit synthesis request"}
