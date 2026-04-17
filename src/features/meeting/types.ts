@@ -5,6 +5,12 @@ export type MeetingProvider =
   | "anthropic"
   | "google"
   | "local";
+export type MeetingMessageType =
+  | "user"
+  | "ai_message"
+  | "synthesis"
+  | "debate_judgment"
+  | "system_status";
 
 export type SpeakerRole = "vision" | "reality" | "audit";
 
