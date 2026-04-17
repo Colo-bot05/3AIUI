@@ -21,6 +21,13 @@ export type ConversationState =
   | "judged";
 export type DebateModel = "gpt" | "gemini" | "claude";
 export type DebateRole = "pro" | "con" | "judge";
+export type SupportedAttachmentExtension =
+  | "pdf"
+  | "docx"
+  | "pptx"
+  | "xlsx"
+  | "md"
+  | "txt";
 
 export type SpeakerRole = "vision" | "reality" | "audit";
 
@@ -54,6 +61,16 @@ export interface DebateAssignmentLabels {
   judge: string;
 }
 
+export interface MeetingAttachment {
+  id: string;
+  filename: string;
+  extension: SupportedAttachmentExtension;
+  mimeType: string;
+  size: number;
+  extractedText: string;
+  excerpt: string;
+}
+
 export interface MeetingRunResult {
   theme: string;
   mode: MeetingMode;
@@ -66,6 +83,7 @@ export interface MeetingRunResult {
 export interface RunMeetingInput {
   theme: string;
   mode: MeetingMode;
+  attachments?: MeetingAttachment[];
 }
 
 export interface ConversationStateSnapshot {

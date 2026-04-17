@@ -1,4 +1,5 @@
 import type {
+  MeetingAttachment,
   DebateJudgmentResult,
   MeetingMode,
   MeetingRunResult,
@@ -53,13 +54,30 @@ const MODE_GUIDANCE: Record<
   },
 };
 
+function buildAttachmentContext(attachments: MeetingAttachment[]) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  const filenames = attachments.map((attachment) => attachment.filename).join(" / ");
+  const firstAttachment = attachments[0];
+
+  return {
+    filenames,
+    firstExcerpt: firstAttachment.excerpt,
+    count: attachments.length,
+  };
+}
+
 function buildRoleContent(
   role: SpeakerRole,
   theme: string,
   mode: MeetingMode,
+  attachments: MeetingAttachment[],
 ): RoleResponse {
   const meta = ROLE_META[role];
   const modeGuide = MODE_GUIDANCE[mode];
+  const attachmentContext = buildAttachmentContext(attachments);
 
   const roleParagraphs: Record<SpeakerRole, string[]> = {
     vision: [
@@ -78,6 +96,12 @@ function buildRoleContent(
       "CI では lint / typecheck / build を最小セットに固定し、PR段階で壊れていないことを機械的に確認できる状態を作るのがMVPの守りになります。",
     ],
   };
+
+  if (attachmentContext) {
+    roleParagraphs[role].unshift(
+      `添付資料（${attachmentContext.count}件: ${attachmentContext.filenames}）を前提に見ると、まず押さえるべきポイントは「${attachmentContext.firstExcerpt}」です。`,
+    );
+  }
 
   return {
     role,
@@ -113,27 +137,39 @@ function buildMockDebateJudgment(responses: RoleResponse[]): DebateJudgmentResul
 async function runMockMeeting({
   theme,
   mode,
+  attachments = [],
 }: RunMeetingInput): Promise<MeetingRunResult> {
   const normalizedTheme = theme.trim() || "ローカルLLM構築を加速する3AI会議UI";
   const modeGuide = MODE_GUIDANCE[mode];
+  const attachmentContext = buildAttachmentContext(attachments);
 
   const responses: RoleResponse[] = [
-    buildRoleContent("vision", normalizedTheme, mode),
-    buildRoleContent("reality", normalizedTheme, mode),
-    buildRoleContent("audit", normalizedTheme, mode),
+    buildRoleContent("vision", normalizedTheme, mode, attachments),
+    buildRoleContent("reality", normalizedTheme, mode, attachments),
+    buildRoleContent("audit", normalizedTheme, mode, attachments),
   ];
   const synthesis: SynthesisResult = {
     agreements: [
       `${modeGuide.agreementsLead}として、3AIの役割を明示した会議UIにする。`,
       "初回はモックデータで成立させ、UI層とAPI層の境界を先に作る。",
+      ...(attachmentContext
+        ? [`添付資料（${attachmentContext.filenames}）を会議コンテキストとして扱えるようにする。`]
+        : []),
       "将来のAWS/ECS移行を見据え、Docker・環境変数・PostgreSQL前提の土台を先に置く。",
     ],
     openQuestions: [
       "各AIの発言を逐次生成にするか、まとめて返すか。",
+      ...(attachmentContext
+        ? ["資料テキストをどこまで要約して provider に渡すか。"]
+        : []),
       "会話履歴保存をRDB中心にするか、イベントログ中心にするか。",
       "実LLM接続時に各Providerの出力差をどこまで統一フォーマットへ寄せるか。",
     ],
-    recommendation: `${modeGuide.recommendationLead}として、まずは単一画面の会議UI、モックorchestrator API、CI、Docker、READMEまでを1セットで整えるのが最適です。`,
+    recommendation: `${modeGuide.recommendationLead}として、まずは単一画面の会議UI、モックorchestrator API、CI、Docker、READMEまでを1セットで整えるのが最適です。${
+      attachmentContext
+        ? ` 添付資料から抽出したテキストを前提条件として会話へ流し込むと、議論の具体性を一段上げられます。`
+        : ""
+    }`,
   };
 
   return {
