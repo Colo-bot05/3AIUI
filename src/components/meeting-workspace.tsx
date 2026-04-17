@@ -221,6 +221,24 @@ function isHardAttachmentError(error?: string) {
 
 type WorkspaceAction = "continue" | "finalize";
 
+function buildAttachmentErrorItem(
+  file: Pick<File, "name" | "type" | "size">,
+  extension: WorkspaceAttachmentItem["extension"],
+  error: string,
+): WorkspaceAttachmentItem {
+  return {
+    id: `attachment-error-${Math.random().toString(36).slice(2, 10)}`,
+    filename: file.name,
+    extension,
+    mimeType: file.type || "application/octet-stream",
+    size: file.size,
+    extractedText: "",
+    excerpt: "",
+    status: "error",
+    error,
+  };
+}
+
 export function MeetingWorkspace() {
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [submittedPrompt, setSubmittedPrompt] = useState(DEFAULT_THEME);
@@ -273,7 +291,7 @@ export function MeetingWorkspace() {
       return;
     }
 
-    const parsedAttachments = await Promise.all(
+    const parsedAttachments = await Promise.allSettled(
       selectedFiles.map(async (file): Promise<WorkspaceAttachmentItem> => {
         const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
 
@@ -282,64 +300,74 @@ export function MeetingWorkspace() {
             extension as (typeof SUPPORTED_ATTACHMENT_EXTENSIONS)[number],
           )
         ) {
-          return {
-            id: `attachment-error-${Math.random().toString(36).slice(2, 10)}`,
-            filename: file.name,
-            extension: "txt",
-            mimeType: file.type || "application/octet-stream",
-            size: file.size,
-            extractedText: "",
-            excerpt: "",
-            status: "error",
-            error: "対応していないファイル形式です。",
-          };
+          return buildAttachmentErrorItem(file, "txt", "対応していないファイル形式です。");
         }
 
         if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
-          return {
-            id: `attachment-error-${Math.random().toString(36).slice(2, 10)}`,
-            filename: file.name,
-            extension: extension as WorkspaceAttachmentItem["extension"],
-            mimeType: file.type || "application/octet-stream",
-            size: file.size,
-            extractedText: "",
-            excerpt: "",
-            status: "error",
-            error: "ファイルサイズが上限を超えています。",
-          };
+          return buildAttachmentErrorItem(
+            file,
+            extension as WorkspaceAttachmentItem["extension"],
+            "ファイルサイズが上限を超えています。",
+          );
         }
 
         const formData = new FormData();
         formData.append("file", file);
 
-        const response = await fetch("/api/attachments/parse", {
-          method: "POST",
-          body: formData,
-        });
-        const payload = (await response.json()) as ParsedAttachmentResponse;
+        try {
+          const response = await fetch("/api/attachments/parse", {
+            method: "POST",
+            body: formData,
+          });
+          const payload = (await response.json()) as ParsedAttachmentResponse;
 
-        if (!response.ok || !payload.attachment) {
+          if (!response.ok || !payload.attachment) {
+            return buildAttachmentErrorItem(
+              file,
+              extension as WorkspaceAttachmentItem["extension"],
+              payload.error?.message ?? "ファイル解析に失敗しました。",
+            );
+          }
+
           return {
-            id: `attachment-error-${Math.random().toString(36).slice(2, 10)}`,
-            filename: file.name,
-            extension: extension as WorkspaceAttachmentItem["extension"],
-            mimeType: file.type || "application/octet-stream",
-            size: file.size,
-            extractedText: "",
-            excerpt: "",
-            status: "error",
-            error: payload.error?.message ?? "ファイル解析に失敗しました。",
+            ...payload.attachment,
+            status: "ready",
           };
+        } catch {
+          return buildAttachmentErrorItem(
+            file,
+            extension as WorkspaceAttachmentItem["extension"],
+            "ファイル解析に失敗しました。",
+          );
         }
-
-        return {
-          ...payload.attachment,
-          status: "ready",
-        };
       }),
     );
 
-    setAttachments((current) => [...current, ...parsedAttachments]);
+    setAttachments((current) => [
+      ...current,
+      ...parsedAttachments.map((result, index) => {
+        if (result.status === "fulfilled") {
+          return result.value;
+        }
+
+        const file = selectedFiles[index];
+        const extension = file?.name.split(".").pop()?.toLowerCase() ?? "";
+
+        return buildAttachmentErrorItem(
+          {
+            name: file?.name ?? "unknown",
+            type: file?.type || "application/octet-stream",
+            size: file?.size ?? 0,
+          },
+          SUPPORTED_ATTACHMENT_EXTENSIONS.includes(
+            extension as (typeof SUPPORTED_ATTACHMENT_EXTENSIONS)[number],
+          )
+            ? (extension as WorkspaceAttachmentItem["extension"])
+            : "txt",
+          "ファイル解析に失敗しました。",
+        );
+      }),
+    ]);
     event.target.value = "";
   }
 
