@@ -1,7 +1,13 @@
 "use client";
 
+import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 
+import type { ParsedAttachmentResponse, WorkspaceAttachmentItem } from "@/features/attachments/types";
+import {
+  MAX_ATTACHMENT_SIZE_BYTES,
+  SUPPORTED_ATTACHMENT_EXTENSIONS,
+} from "@/features/attachments/types";
 import { MODE_OPTIONS } from "@/features/meeting/mode-config";
 import {
   buildDebateJudgmentDisplay,
@@ -19,6 +25,7 @@ import type {
   DebateModel,
   DebateRole,
   DebateRoleAssignments,
+  MeetingAttachment,
   MeetingMessageType,
   MeetingMode,
   MeetingRunResult,
@@ -185,7 +192,52 @@ function pickModelLabel(value: DebateModel | "") {
   return DEBATE_MODELS.find((item) => item.value === value)?.label ?? "未選択";
 }
 
+function formatFileSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function hasReadableAttachmentPreview(excerpt: string) {
+  return excerpt.trim().length >= 8;
+}
+
+function isHardAttachmentError(error?: string) {
+  if (!error) {
+    return false;
+  }
+
+  return (
+    error.includes("対応していないファイル形式") ||
+    error.includes("ファイルサイズが上限を超えています")
+  );
+}
+
 type WorkspaceAction = "continue" | "finalize";
+
+function buildAttachmentErrorItem(
+  file: Pick<File, "name" | "type" | "size">,
+  extension: WorkspaceAttachmentItem["extension"],
+  error: string,
+): WorkspaceAttachmentItem {
+  return {
+    id: `attachment-error-${Math.random().toString(36).slice(2, 10)}`,
+    filename: file.name,
+    extension,
+    mimeType: file.type || "application/octet-stream",
+    size: file.size,
+    extractedText: "",
+    excerpt: "",
+    status: "error",
+    error,
+  };
+}
 
 export function MeetingWorkspace() {
   const [theme, setTheme] = useState(DEFAULT_THEME);
@@ -200,9 +252,11 @@ export function MeetingWorkspace() {
   const [debateAssignments, setDebateAssignments] = useState<DebateRoleAssignments>(
     INITIAL_DEBATE_ASSIGNMENTS,
   );
+  const [attachments, setAttachments] = useState<WorkspaceAttachmentItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function ensureSessionId() {
     if (sessionIdRef.current) {
@@ -226,6 +280,102 @@ export function MeetingWorkspace() {
   const hasIncompleteDebateAssignments =
     mode === "debate" &&
     Object.values(debateAssignments).some((value) => value === "");
+  const readyAttachments = attachments.filter(
+    (attachment) => attachment.status === "ready",
+  );
+
+  async function handleAttachmentSelection(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files ?? []);
+
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
+    const parsedAttachments = await Promise.allSettled(
+      selectedFiles.map(async (file): Promise<WorkspaceAttachmentItem> => {
+        const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+
+        if (
+          !SUPPORTED_ATTACHMENT_EXTENSIONS.includes(
+            extension as (typeof SUPPORTED_ATTACHMENT_EXTENSIONS)[number],
+          )
+        ) {
+          return buildAttachmentErrorItem(file, "txt", "対応していないファイル形式です。");
+        }
+
+        if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+          return buildAttachmentErrorItem(
+            file,
+            extension as WorkspaceAttachmentItem["extension"],
+            "ファイルサイズが上限を超えています。",
+          );
+        }
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+          const response = await fetch("/api/attachments/parse", {
+            method: "POST",
+            body: formData,
+          });
+          const payload = (await response.json()) as ParsedAttachmentResponse;
+
+          if (!response.ok || !payload.attachment) {
+            return buildAttachmentErrorItem(
+              file,
+              extension as WorkspaceAttachmentItem["extension"],
+              payload.error?.message ?? "ファイル解析に失敗しました。",
+            );
+          }
+
+          return {
+            ...payload.attachment,
+            status: "ready",
+          };
+        } catch {
+          return buildAttachmentErrorItem(
+            file,
+            extension as WorkspaceAttachmentItem["extension"],
+            "ファイル解析に失敗しました。",
+          );
+        }
+      }),
+    );
+
+    setAttachments((current) => [
+      ...current,
+      ...parsedAttachments.map((result, index) => {
+        if (result.status === "fulfilled") {
+          return result.value;
+        }
+
+        const file = selectedFiles[index];
+        const extension = file?.name.split(".").pop()?.toLowerCase() ?? "";
+
+        return buildAttachmentErrorItem(
+          {
+            name: file?.name ?? "unknown",
+            type: file?.type || "application/octet-stream",
+            size: file?.size ?? 0,
+          },
+          SUPPORTED_ATTACHMENT_EXTENSIONS.includes(
+            extension as (typeof SUPPORTED_ATTACHMENT_EXTENSIONS)[number],
+          )
+            ? (extension as WorkspaceAttachmentItem["extension"])
+            : "txt",
+          "ファイル解析に失敗しました。",
+        );
+      }),
+    ]);
+    event.target.value = "";
+  }
+
+  function handleAttachmentRemove(attachmentId: string) {
+    setAttachments((current) =>
+      current.filter((attachment) => attachment.id !== attachmentId),
+    );
+  }
 
   async function handleRun(action: WorkspaceAction) {
     const trimmedInput = theme.trim();
@@ -296,7 +446,19 @@ export function MeetingWorkspace() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ theme, mode }),
+        body: JSON.stringify({
+          theme,
+          mode,
+          attachments: readyAttachments.map<MeetingAttachment>((attachment) => ({
+            id: attachment.id,
+            filename: attachment.filename,
+            extension: attachment.extension,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
+            extractedText: attachment.extractedText,
+            excerpt: attachment.excerpt,
+          })),
+        }),
       });
 
       if (!response.ok) {
@@ -371,6 +533,10 @@ export function MeetingWorkspace() {
     `${DEBATE_ROLE_LABELS.con}: ${pickModelLabel(debateAssignments.con)}`,
     `${DEBATE_ROLE_LABELS.judge}: ${pickModelLabel(debateAssignments.judge)}`,
   ].join("\n");
+  const attachmentSummary =
+    readyAttachments.length > 0
+      ? readyAttachments.map((attachment) => `- ${attachment.filename}`).join("\n")
+      : "";
   const debateAssignmentLabels = {
     pro: pickModelLabel(debateAssignments.pro),
     con: pickModelLabel(debateAssignments.con),
@@ -402,8 +568,12 @@ export function MeetingWorkspace() {
       markerClass: "bg-zinc-950",
       body:
         mode === "debate"
-          ? `${submittedPrompt}\n\n現在の割当\n${debateAssignmentSummary}`
-          : submittedPrompt,
+          ? `${submittedPrompt}\n\n現在の割当\n${debateAssignmentSummary}${
+              attachmentSummary ? `\n\n前提資料\n${attachmentSummary}` : ""
+            }`
+          : `${submittedPrompt}${
+              attachmentSummary ? `\n\n前提資料\n${attachmentSummary}` : ""
+            }`,
       meta:
         mode === "debate"
           ? `mode: ${activeMode.label} / roles assigned`
@@ -658,6 +828,89 @@ export function MeetingWorkspace() {
                 className="mt-2 w-full resize-none rounded-2xl border border-zinc-900/10 bg-white px-4 py-3 text-sm leading-7 text-zinc-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
                 placeholder="議論したいテーマを入力"
               />
+            </div>
+
+            <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="section-title">Attachments</p>
+                  <h3 className="mt-2 text-sm font-semibold text-zinc-950">
+                    前提資料
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-full border border-zinc-900/10 bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                >
+                  資料を追加
+                </button>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".pdf,.docx,.pptx,.xlsx,.md,.txt"
+                onChange={handleAttachmentSelection}
+                className="hidden"
+              />
+              <p className="mt-3 text-xs leading-6 text-zinc-500">
+                pdf / docx / pptx / xlsx / md / txt を会議コンテキストとして添付できます。1ファイルあたり最大 {formatFileSize(MAX_ATTACHMENT_SIZE_BYTES)} です。
+              </p>
+
+              {attachments.length > 0 ? (
+                <div className="mt-4 space-y-3">
+                  {attachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="rounded-2xl border border-zinc-900/10 bg-white px-4 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-zinc-950">
+                            {attachment.filename}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-500">
+                            <span>{attachment.extension}</span>
+                            <span>{formatFileSize(attachment.size)}</span>
+                            <span>
+                              {attachment.status === "ready"
+                                ? "ready"
+                                : isHardAttachmentError(attachment.error)
+                                  ? "error"
+                                  : "no preview"}
+                            </span>
+                          </div>
+                          {attachment.error && isHardAttachmentError(attachment.error) ? (
+                            <p className="mt-2 text-xs leading-6 text-rose-600">
+                              {attachment.error}
+                            </p>
+                          ) : (
+                            <p className="mt-2 line-clamp-3 text-xs leading-6 text-zinc-600">
+                              {attachment.error && !isHardAttachmentError(attachment.error)
+                                ? "プレビューなし"
+                                : hasReadableAttachmentPreview(attachment.excerpt)
+                                ? attachment.excerpt
+                                : "プレビューなし"}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAttachmentRemove(attachment.id)}
+                          className="rounded-full border border-zinc-900/10 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:border-zinc-900/20 hover:bg-zinc-50"
+                        >
+                          削除
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-4 text-sm leading-7 text-zinc-500">
+                  添付した資料は、現在の会議の前提コンテキストとして使われます。
+                </div>
+              )}
             </div>
 
             <div>
