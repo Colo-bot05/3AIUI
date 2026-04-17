@@ -31,6 +31,10 @@ import type {
   MeetingRunResult,
   SpeakerRole,
 } from "@/features/meeting/types";
+import type {
+  SessionAttachmentContext,
+  SessionAttachmentReference,
+} from "@/features/session/types";
 import { inMemorySessionRepository } from "@/lib/session/in-memory-session-repository";
 
 const DEFAULT_THEME =
@@ -221,6 +225,36 @@ function isHardAttachmentError(error?: string) {
 
 type WorkspaceAction = "continue" | "finalize";
 
+function buildSessionAttachmentReference(
+  attachment: WorkspaceAttachmentItem,
+): SessionAttachmentReference {
+  return {
+    id: attachment.id,
+    filename: attachment.filename,
+    extension: attachment.extension,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    status: attachment.status,
+  };
+}
+
+function buildSessionAttachmentContext(
+  attachments: WorkspaceAttachmentItem[],
+): SessionAttachmentContext | undefined {
+  if (attachments.length === 0) {
+    return undefined;
+  }
+
+  const references = attachments.map(buildSessionAttachmentReference);
+
+  return {
+    attachmentIds: references.map((attachment) => attachment.id),
+    attachmentCount: references.length,
+    attachmentNames: references.map((attachment) => attachment.filename),
+    attachments: references,
+  };
+}
+
 function buildAttachmentErrorItem(
   file: Pick<File, "name" | "type" | "size">,
   extension: WorkspaceAttachmentItem["extension"],
@@ -343,38 +377,68 @@ export function MeetingWorkspace() {
       }),
     );
 
+    const nextAttachments = parsedAttachments.map((result, index) => {
+      if (result.status === "fulfilled") {
+        return result.value;
+      }
+
+      const file = selectedFiles[index];
+      const extension = file?.name.split(".").pop()?.toLowerCase() ?? "";
+
+      return buildAttachmentErrorItem(
+        {
+          name: file?.name ?? "unknown",
+          type: file?.type || "application/octet-stream",
+          size: file?.size ?? 0,
+        },
+        SUPPORTED_ATTACHMENT_EXTENSIONS.includes(
+          extension as (typeof SUPPORTED_ATTACHMENT_EXTENSIONS)[number],
+        )
+          ? (extension as WorkspaceAttachmentItem["extension"])
+          : "txt",
+        "ファイル解析に失敗しました。",
+      );
+    });
+
     setAttachments((current) => [
       ...current,
-      ...parsedAttachments.map((result, index) => {
-        if (result.status === "fulfilled") {
-          return result.value;
-        }
-
-        const file = selectedFiles[index];
-        const extension = file?.name.split(".").pop()?.toLowerCase() ?? "";
-
-        return buildAttachmentErrorItem(
-          {
-            name: file?.name ?? "unknown",
-            type: file?.type || "application/octet-stream",
-            size: file?.size ?? 0,
-          },
-          SUPPORTED_ATTACHMENT_EXTENSIONS.includes(
-            extension as (typeof SUPPORTED_ATTACHMENT_EXTENSIONS)[number],
-          )
-            ? (extension as WorkspaceAttachmentItem["extension"])
-            : "txt",
-          "ファイル解析に失敗しました。",
-        );
-      }),
+      ...nextAttachments,
     ]);
+    const sessionId = await ensureSessionId();
+    for (const attachment of nextAttachments) {
+      await inMemorySessionRepository.appendEntry({
+        sessionId,
+        type: "attachment_attached",
+        mode,
+        prompt: "",
+        conversationState,
+        attachmentContext: buildSessionAttachmentContext([attachment]),
+      });
+    }
     event.target.value = "";
   }
 
-  function handleAttachmentRemove(attachmentId: string) {
+  async function handleAttachmentRemove(attachmentId: string) {
+    const removedAttachment = attachments.find(
+      (attachment) => attachment.id === attachmentId,
+    );
+
     setAttachments((current) =>
       current.filter((attachment) => attachment.id !== attachmentId),
     );
+
+    if (!removedAttachment) {
+      return;
+    }
+
+    await inMemorySessionRepository.appendEntry({
+      sessionId: await ensureSessionId(),
+      type: "attachment_removed",
+      mode,
+      prompt: "",
+      conversationState,
+      attachmentContext: buildSessionAttachmentContext([removedAttachment]),
+    });
   }
 
   async function handleRun(action: WorkspaceAction) {
@@ -482,6 +546,7 @@ export function MeetingWorkspace() {
         mode,
         prompt: trimmedInput || DEFAULT_THEME,
         conversationState: nextConversationState,
+        attachmentContext: buildSessionAttachmentContext(readyAttachments),
       });
     } catch (nextError) {
       setError(

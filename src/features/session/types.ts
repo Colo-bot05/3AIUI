@@ -1,9 +1,32 @@
-import type { ConversationState, MeetingMode } from "@/features/meeting/types";
+import type { AttachmentParseStatus } from "@/features/attachments/types";
+import type {
+  ConversationState,
+  MeetingMode,
+  SupportedAttachmentExtension,
+} from "@/features/meeting/types";
 
 export type SessionEventType =
+  | "attachment_attached"
+  | "attachment_removed"
   | "meeting_generated"
   | "synthesis_requested"
   | "judgment_requested";
+
+export interface SessionAttachmentReference {
+  id: string;
+  filename: string;
+  extension: SupportedAttachmentExtension;
+  mimeType: string;
+  size: number;
+  status: AttachmentParseStatus;
+}
+
+export interface SessionAttachmentContext {
+  attachmentIds: string[];
+  attachmentCount: number;
+  attachmentNames: string[];
+  attachments: SessionAttachmentReference[];
+}
 
 export interface SessionEntry {
   id: string;
@@ -11,6 +34,7 @@ export interface SessionEntry {
   mode: MeetingMode;
   prompt: string;
   conversationState: ConversationState;
+  attachmentContext?: SessionAttachmentContext;
   createdAt: string;
 }
 

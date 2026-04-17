@@ -1,6 +1,11 @@
 import type { ConversationState, MeetingMode } from "@/features/meeting/types";
 
-import type { MeetingSession, SessionEntry, SessionEventType } from "./types";
+import type {
+  MeetingSession,
+  SessionAttachmentContext,
+  SessionEntry,
+  SessionEventType,
+} from "./types";
 
 export interface CreateSessionInput {
   initialMode: MeetingMode;
@@ -12,6 +17,7 @@ export interface AppendSessionEntryInput {
   mode: MeetingMode;
   prompt: string;
   conversationState: ConversationState;
+  attachmentContext?: SessionAttachmentContext;
 }
 
 export interface SessionRepository {
