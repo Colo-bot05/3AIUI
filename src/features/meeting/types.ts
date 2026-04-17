@@ -75,7 +75,7 @@ export interface MeetingRunResult {
   theme: string;
   mode: MeetingMode;
   responses: RoleResponse[];
-  synthesis: SynthesisResult;
+  synthesis?: SynthesisResult;
   debateJudgment?: DebateJudgmentResult;
   generatedAt: string;
 }
@@ -86,12 +86,54 @@ export interface RolePrompts {
   audit: string;
 }
 
-export interface RunMeetingInput {
+export type MeetingAction = "continue" | "synthesize" | "judge";
+
+export interface MeetingActionBaseInput {
   theme: string;
   mode: MeetingMode;
   attachments?: MeetingAttachment[];
   rolePrompts?: RolePrompts;
+  history: RoleResponse[];
 }
+
+export interface ContinueActionInput extends MeetingActionBaseInput {
+  action: "continue";
+  nextSpeaker: Exclude<SpeakerRole, "audit">;
+}
+
+export interface SynthesizeActionInput extends MeetingActionBaseInput {
+  action: "synthesize";
+}
+
+export interface JudgeActionInput extends MeetingActionBaseInput {
+  action: "judge";
+  debateAssignmentLabels?: DebateAssignmentLabels;
+}
+
+export type MeetingActionInput =
+  | ContinueActionInput
+  | SynthesizeActionInput
+  | JudgeActionInput;
+
+export interface ContinueActionResult {
+  action: "continue";
+  turn: RoleResponse;
+}
+
+export interface SynthesizeActionResult {
+  action: "synthesize";
+  synthesis: SynthesisResult;
+}
+
+export interface JudgeActionResult {
+  action: "judge";
+  debateJudgment: DebateJudgmentResult;
+}
+
+export type MeetingActionResult =
+  | ContinueActionResult
+  | SynthesizeActionResult
+  | JudgeActionResult;
 
 export interface ConversationStateSnapshot {
   mode: MeetingMode;

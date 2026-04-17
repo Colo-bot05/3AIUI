@@ -29,46 +29,7 @@ export const INITIAL_RESULT: MeetingRunResult = {
   theme: DEFAULT_THEME,
   mode: "design_review",
   generatedAt: "2026-04-16T00:00:00.000Z",
-  responses: [
-    {
-      role: "vision",
-      label: "構想AI",
-      viewpoint: "可能性を押し広げる提案役",
-      emphasis: "新しい価値の打ち出し",
-      content:
-        "3AIをただ並べるのではなく、“会議”として見せることでプロダクトの意味が立ちます。\n\nユーザーはテーマを入力したあと、3つの人格が異なる立場で考え、それを最後に統合する流れを一度で体験できるべきです。",
-    },
-    {
-      role: "reality",
-      label: "現実AI",
-      viewpoint: "実装・運用の現実性を見る実務役",
-      emphasis: "実装順序とコスト感",
-      content:
-        "MVPでは、UIとモックAPIの境界を先に作れば十分です。\n\n本物のLLM接続を急がず、まずは入力・実行・3AI表示・統合結果表示までの一連の導線を壊れない形で整えましょう。",
-    },
-    {
-      role: "audit",
-      label: "監査AI",
-      viewpoint: "抜け漏れやリスクを止める監査役",
-      emphasis: "失敗条件の先回り",
-      content:
-        "最初のPRで守るべきなのは、責務を混ぜないことと、広げすぎないことです。\n\nCI・Docker・READMEまで含めておくと、次のPR以降が安全に進められます。",
-    },
-  ],
-  synthesis: {
-    agreements: [
-      "3AIの役割が一目で分かるUIにする。",
-      "統合結果エリアを画面の主役の1つとして扱う。",
-      "モック実装でもAPI境界を作って将来差し替えやすくする。",
-    ],
-    openQuestions: [
-      "実LLM接続時のProvider Adapterの責務範囲。",
-      "会話履歴保存の初期スキーマ設計。",
-      "発言を逐次ストリーミングにするかどうか。",
-    ],
-    recommendation:
-      "最初の土台では、会議UI・モックAPI・Docker・CI・READMEを整え、次のPRで永続化と実オーケストレーションの足場へ進むのが自然です。",
-  },
+  responses: [],
 };
 
 export const ROLE_STYLES = {
@@ -350,7 +311,7 @@ export interface BuildTimelineEntriesInput {
   result: MeetingRunResult;
   hasSynthesis: boolean;
   hasJudgment: boolean;
-  synthesisDisplay: SynthesisDisplay;
+  synthesisDisplay: SynthesisDisplay | null;
   debateJudgmentDisplay: DebateJudgmentDisplay | null;
 }
 
@@ -431,11 +392,14 @@ export function buildTimelineEntries({
               label: "ユーザーが判定指示を出すまで保留",
               accentClass: "text-violet-900",
               markerClass: "bg-violet-500",
-              body: "この位置に最終判定メッセージが入る想定です。ユーザーが明示的に判定を依頼するまで、審判AIは結論を固定しません。",
+              body:
+                result.responses.length === 0
+                  ? "Continue を押すとまず構想AIが発言します。構想と現実が交互にターンを重ね、Judge を押すと審判AIが判定を出します。"
+                  : "この位置に最終判定メッセージが入る想定です。ユーザーが明示的に判定を依頼するまで、審判AIは結論を固定しません。",
               meta: "debate_judgment placeholder",
             },
           ]
-      : hasSynthesis
+      : hasSynthesis && synthesisDisplay
         ? [
             {
               id: "synthesis-result",
@@ -456,7 +420,10 @@ export function buildTimelineEntries({
               label: "ユーザーが整理指示を出すまで保留",
               accentClass: "text-violet-900",
               markerClass: "bg-violet-500",
-              body: "この位置に統合メッセージが入る想定です。ユーザーが明示的に整理を依頼するまで、AI はまだ最終結論を固定しません。",
+              body:
+                result.responses.length === 0
+                  ? "Continue を押すとまず構想AIが発言します。構想と現実が交互にターンを重ね、Synthesize を押すと監査AIが合意・未決・推奨をまとめます。"
+                  : "この位置に統合メッセージが入る想定です。ユーザーが明示的に整理を依頼するまで、AI はまだ最終結論を固定しません。",
               meta: "synthesis placeholder",
             },
           ]),

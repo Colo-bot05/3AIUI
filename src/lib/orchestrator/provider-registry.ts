@@ -1,4 +1,8 @@
-import type { MeetingProvider, MeetingRunResult, RunMeetingInput } from "@/features/meeting/types";
+import type {
+  MeetingActionInput,
+  MeetingActionResult,
+  MeetingProvider,
+} from "@/features/meeting/types";
 
 import type { MeetingProviderAdapter } from "@/lib/orchestrator/provider-adapter";
 import { anthropicMeetingProvider } from "@/lib/orchestrator/providers/anthropic-provider";
@@ -19,10 +23,10 @@ export function resolveMeetingProvider(providerName?: string): MeetingProviderAd
   return PROVIDERS[providerName as MeetingProvider] ?? PROVIDERS[DEFAULT_PROVIDER]!;
 }
 
-export async function runMeetingWithProvider(
-  input: RunMeetingInput,
+export async function runMeetingAction(
+  input: MeetingActionInput,
   providerName?: string,
-): Promise<MeetingRunResult> {
+): Promise<MeetingActionResult> {
   const provider = resolveMeetingProvider(providerName);
-  return provider.runMeeting(input);
+  return provider.performAction(input);
 }
