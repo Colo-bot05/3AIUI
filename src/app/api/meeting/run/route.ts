@@ -34,6 +34,16 @@ export async function POST(request: Request) {
     }
   }
 
+  const attachments = body.attachments ?? [];
+  const firstAttachment = attachments[0];
+  console.log(
+    "[meeting/run] action=%s mode=%s attachments=%d firstLen=%d",
+    body.action,
+    body.mode,
+    attachments.length,
+    firstAttachment?.extractedText?.length ?? 0,
+  );
+
   const result = await runMeetingAction(
     body as MeetingActionInput,
     process.env.MEETING_PROVIDER,
