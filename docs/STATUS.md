@@ -156,6 +156,5 @@ AWS 本番デプロイや DB 永続化はそのあと。
 
 1. `debateJudgment` の optional 化
 2. `INITIAL_RESULT` 重複整理
-3. Prompt Settings 検討
 
 つまり、次は新機能を増やすより境界整理に戻るターン。

@@ -1,9 +1,10 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { WorkspaceAttachmentItem } from "@/features/attachments/types";
+import { DEFAULT_ROLE_PROMPTS } from "@/features/meeting/default-prompts";
 import { MODE_OPTIONS } from "@/features/meeting/mode-config";
 import {
   buildDebateJudgmentDisplay,
@@ -24,10 +25,14 @@ import type {
   MeetingAttachment,
   MeetingMode,
   MeetingRunResult,
+  RolePrompts,
 } from "@/features/meeting/types";
 import { inMemorySessionRepository } from "@/lib/session/in-memory-session-repository";
 
 import { ControlSidebar } from "./meeting-workspace/control-sidebar";
+import { PromptSettingsPanel } from "./meeting-workspace/prompt-settings-panel";
+
+const PROMPT_STORAGE_KEY = "meeting-workspace-role-prompts";
 import {
   DEBATE_ROLE_LABELS,
   DEFAULT_THEME,
@@ -58,10 +63,51 @@ export function MeetingWorkspace() {
     INITIAL_DEBATE_ASSIGNMENTS,
   );
   const [attachments, setAttachments] = useState<WorkspaceAttachmentItem[]>([]);
+  const [rolePrompts, setRolePrompts] = useState<RolePrompts>(DEFAULT_ROLE_PROMPTS);
+  const [isPromptSettingsOpen, setIsPromptSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const stored = window.sessionStorage.getItem(PROMPT_STORAGE_KEY);
+      if (!stored) {
+        return;
+      }
+      const parsed = JSON.parse(stored) as Partial<RolePrompts>;
+      if (
+        parsed &&
+        typeof parsed.vision === "string" &&
+        typeof parsed.reality === "string" &&
+        typeof parsed.audit === "string"
+      ) {
+        setRolePrompts({
+          vision: parsed.vision,
+          reality: parsed.reality,
+          audit: parsed.audit,
+        });
+      }
+    } catch {
+      // sessionStorage unavailable or corrupt — fall back to defaults.
+    }
+  }, []);
+
+  function handleSaveRolePrompts(next: RolePrompts) {
+    setRolePrompts(next);
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(PROMPT_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // sessionStorage quota or disabled — state still updates.
+    }
+  }
 
   async function ensureSessionId() {
     if (sessionIdRef.current) {
@@ -228,6 +274,7 @@ export function MeetingWorkspace() {
             extractedText: attachment.extractedText,
             excerpt: attachment.excerpt,
           })),
+          rolePrompts,
         }),
       });
 
@@ -376,7 +423,16 @@ export function MeetingWorkspace() {
         debateJudgmentDisplay={debateJudgmentDisplay}
         debateAssignmentLabels={debateAssignmentLabels}
         result={result}
+        onOpenPromptSettings={() => setIsPromptSettingsOpen(true)}
       />
+
+      {isPromptSettingsOpen ? (
+        <PromptSettingsPanel
+          onClose={() => setIsPromptSettingsOpen(false)}
+          currentPrompts={rolePrompts}
+          onSave={handleSaveRolePrompts}
+        />
+      ) : null}
     </div>
   );
 }

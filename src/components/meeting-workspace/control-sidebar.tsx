@@ -60,6 +60,7 @@ export interface ControlSidebarProps {
   debateJudgmentDisplay: DebateJudgmentDisplay | null;
   debateAssignmentLabels: DebateAssignmentLabels;
   result: MeetingRunResult;
+  onOpenPromptSettings: () => void;
 }
 
 export function ControlSidebar({
@@ -91,6 +92,7 @@ export function ControlSidebar({
   debateJudgmentDisplay,
   debateAssignmentLabels,
   result,
+  onOpenPromptSettings,
 }: ControlSidebarProps) {
   return (
     <aside className="glass-panel rounded-[2rem] p-5 sm:p-6 xl:sticky xl:top-8 xl:self-start">
@@ -167,6 +169,27 @@ export function ControlSidebar({
                 );
               })}
             </div>
+          </div>
+
+          <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/70 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="section-title">Prompt Settings</p>
+                <h3 className="mt-2 text-sm font-semibold text-zinc-950">
+                  役割ごとのプロンプト
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenPromptSettings}
+                className="rounded-full border border-zinc-900/10 bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+              >
+                編集
+              </button>
+            </div>
+            <p className="mt-3 text-xs leading-6 text-zinc-500">
+              3 役割の system prompt を編集できます。保存した内容は次回の会議実行から反映されます（sessionStorage に保存）。
+            </p>
           </div>
 
           {mode === "debate" ? (
