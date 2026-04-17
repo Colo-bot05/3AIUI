@@ -68,7 +68,7 @@ export function PromptSettingsPanel({
               役割ごとのプロンプト
             </h2>
             <p className="mt-2 text-sm leading-7 text-zinc-600">
-              3 役割それぞれの system prompt を書き換えられます。保存した内容は次回の会議実行から反映され、進行中の会議には影響しません。保存先は sessionStorage のみで、ページ再読み込みで消えます。
+              3 役割それぞれの system prompt を書き換えられます。保存した内容は以降のすべての会議実行（Continue / Synthesize / Judge）に毎回反映されます。保存先は sessionStorage のみで、ページ再読み込みで消えます。
             </p>
           </div>
           <button

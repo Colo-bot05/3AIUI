@@ -33,6 +33,42 @@ import { ControlSidebar } from "./meeting-workspace/control-sidebar";
 import { PromptSettingsPanel } from "./meeting-workspace/prompt-settings-panel";
 
 const PROMPT_STORAGE_KEY = "meeting-workspace-role-prompts";
+
+function loadRolePromptsFromStorage(): RolePrompts | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const stored = window.sessionStorage.getItem(PROMPT_STORAGE_KEY);
+    if (!stored) {
+      return null;
+    }
+    const parsed = JSON.parse(stored) as Partial<RolePrompts>;
+    if (
+      parsed &&
+      typeof parsed.vision === "string" &&
+      typeof parsed.reality === "string" &&
+      typeof parsed.audit === "string"
+    ) {
+      return {
+        vision: parsed.vision,
+        reality: parsed.reality,
+        audit: parsed.audit,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function areRolePromptsEqual(left: RolePrompts, right: RolePrompts) {
+  return (
+    left.vision === right.vision &&
+    left.reality === right.reality &&
+    left.audit === right.audit
+  );
+}
 import {
   DEBATE_ROLE_LABELS,
   DEFAULT_THEME,
@@ -71,29 +107,9 @@ export function MeetingWorkspace() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    try {
-      const stored = window.sessionStorage.getItem(PROMPT_STORAGE_KEY);
-      if (!stored) {
-        return;
-      }
-      const parsed = JSON.parse(stored) as Partial<RolePrompts>;
-      if (
-        parsed &&
-        typeof parsed.vision === "string" &&
-        typeof parsed.reality === "string" &&
-        typeof parsed.audit === "string"
-      ) {
-        setRolePrompts({
-          vision: parsed.vision,
-          reality: parsed.reality,
-          audit: parsed.audit,
-        });
-      }
-    } catch {
-      // sessionStorage unavailable or corrupt — fall back to defaults.
+    const stored = loadRolePromptsFromStorage();
+    if (stored) {
+      setRolePrompts(stored);
     }
   }, []);
 
@@ -194,6 +210,11 @@ export function MeetingWorkspace() {
   }
 
   async function handleRun(action: WorkspaceAction) {
+    const freshRolePrompts = loadRolePromptsFromStorage() ?? rolePrompts;
+    if (!areRolePromptsEqual(freshRolePrompts, rolePrompts)) {
+      setRolePrompts(freshRolePrompts);
+    }
+
     const trimmedInput = theme.trim();
     const isFinalizeAction = action === "finalize";
     const isSynthesisRequest =
@@ -274,7 +295,7 @@ export function MeetingWorkspace() {
             extractedText: attachment.extractedText,
             excerpt: attachment.excerpt,
           })),
-          rolePrompts,
+          rolePrompts: freshRolePrompts,
         }),
       });
 
