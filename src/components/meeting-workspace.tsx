@@ -84,23 +84,6 @@ const INITIAL_RESULT: MeetingRunResult = {
     recommendation:
       "最初の土台では、会議UI・モックAPI・Docker・CI・READMEを整え、次のPRで永続化と実オーケストレーションの足場へ進むのが自然です。",
   },
-  debateJudgment: {
-    verdictHeadline: "追加検証付きで賛成側案を前進",
-    verdictDetail:
-      "現時点では「追加検証付きで賛成側の方向を前進させる」が妥当です。",
-    reasoning:
-      "賛成側は前進案を示し、反対側はリスク整理を提供しているため、結論を止めるより条件付きで進める方が意思決定しやすい状態です。",
-    proLeadPoint:
-      "3AIをただ並べるのではなく、“会議”として見せることでプロダクトの意味が立ちます。",
-    conLeadPoint:
-      "MVPでは、UIとモックAPIの境界を先に作れば十分です。",
-    openPoints: [
-      "追加検証をどの指標で判定するか",
-      "ローカルLLM構築コストの見積精度",
-      "商用LLM依存をどこまで許容するか",
-    ],
-    nextSteps: ["追加検証の評価基準", "実装コストと依存範囲"],
-  },
 };
 
 const ROLE_STYLES = {
@@ -608,10 +591,10 @@ export function MeetingWorkspace() {
     judge: pickModelLabel(debateAssignments.judge),
   };
   const synthesisDisplay = buildSynthesisDisplay(result.synthesis);
-  const debateJudgmentDisplay = buildDebateJudgmentDisplay(
-    result.debateJudgment,
-    debateAssignmentLabels,
-  );
+  const debateJudgmentDisplay =
+    mode === "debate" && result.debateJudgment
+      ? buildDebateJudgmentDisplay(result.debateJudgment, debateAssignmentLabels)
+      : null;
 
   const timelineEntries: TimelineEntry[] = [
     {
@@ -656,7 +639,7 @@ export function MeetingWorkspace() {
       meta: `${ROLE_STYLES[response.role].model} / turn ${index + 1}`,
     })),
     ...(mode === "debate"
-      ? hasJudgment
+      ? hasJudgment && debateJudgmentDisplay
         ? [
             {
               id: "debate-judgment",
@@ -821,7 +804,7 @@ export function MeetingWorkspace() {
                         <div className="grid gap-3">
                           {(entry.messageType === "synthesis"
                             ? synthesisDisplay.sections
-                            : debateJudgmentDisplay.sections
+                            : debateJudgmentDisplay?.sections ?? []
                           ).map((section) => (
                             <section
                               key={section.title}
@@ -1180,7 +1163,7 @@ export function MeetingWorkspace() {
 
             <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
               <h3 className="text-sm font-semibold text-zinc-950">{activePlaceholder.heading}</h3>
-              {mode === "debate" && hasJudgment ? (
+              {mode === "debate" && hasJudgment && debateJudgmentDisplay ? (
                 <div className="mt-3 space-y-3">
                   <div className="grid grid-cols-3 gap-2">
                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-3 py-3">
