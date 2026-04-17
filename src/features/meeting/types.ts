@@ -38,16 +38,14 @@ export interface SynthesisResult {
   recommendation: string;
 }
 
-export interface SummarySection {
-  title: string;
-  tone: string;
-  items?: string[];
-  body?: string;
-}
-
-export interface PreparedSynthesisContent {
-  body: string;
-  sections: SummarySection[];
+export interface DebateJudgmentResult {
+  verdictHeadline: string;
+  verdictDetail: string;
+  reasoning: string;
+  proLeadPoint: string;
+  conLeadPoint: string;
+  openPoints: string[];
+  nextSteps: string[];
 }
 
 export interface DebateAssignmentLabels {
@@ -56,17 +54,12 @@ export interface DebateAssignmentLabels {
   judge: string;
 }
 
-export interface PreparedDebateJudgmentContent {
-  body: string;
-  sections: SummarySection[];
-}
-
 export interface MeetingRunResult {
   theme: string;
   mode: MeetingMode;
   responses: RoleResponse[];
   synthesis: SynthesisResult;
-  preparedSynthesis: PreparedSynthesisContent;
+  debateJudgment: DebateJudgmentResult;
   generatedAt: string;
 }
 

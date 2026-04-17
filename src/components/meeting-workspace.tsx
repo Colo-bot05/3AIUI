@@ -4,6 +4,10 @@ import { useRef, useState } from "react";
 
 import { MODE_OPTIONS } from "@/features/meeting/mode-config";
 import {
+  buildDebateJudgmentDisplay,
+  buildSynthesisDisplay,
+} from "@/features/meeting/presentation";
+import {
   buildConversationStateSnapshot,
   getAllowedStatesForMode,
   getInitialConversationState,
@@ -20,10 +24,6 @@ import type {
   MeetingRunResult,
   SpeakerRole,
 } from "@/features/meeting/types";
-import {
-  buildMockDebateJudgmentContent,
-  buildMockSynthesisContent,
-} from "@/lib/orchestrator/providers/mock-provider";
 import { inMemorySessionRepository } from "@/lib/session/in-memory-session-repository";
 
 const DEFAULT_THEME =
@@ -73,20 +73,23 @@ const INITIAL_RESULT: MeetingRunResult = {
     recommendation:
       "最初の土台では、会議UI・モックAPI・Docker・CI・READMEを整え、次のPRで永続化と実オーケストレーションの足場へ進むのが自然です。",
   },
-  preparedSynthesis: buildMockSynthesisContent({
-    agreements: [
-      "3AIの役割が一目で分かるUIにする。",
-      "統合結果エリアを画面の主役の1つとして扱う。",
-      "モック実装でもAPI境界を作って将来差し替えやすくする。",
+  debateJudgment: {
+    verdictHeadline: "追加検証付きで賛成側案を前進",
+    verdictDetail:
+      "現時点では「追加検証付きで賛成側の方向を前進させる」が妥当です。",
+    reasoning:
+      "賛成側は前進案を示し、反対側はリスク整理を提供しているため、結論を止めるより条件付きで進める方が意思決定しやすい状態です。",
+    proLeadPoint:
+      "3AIをただ並べるのではなく、“会議”として見せることでプロダクトの意味が立ちます。",
+    conLeadPoint:
+      "MVPでは、UIとモックAPIの境界を先に作れば十分です。",
+    openPoints: [
+      "追加検証をどの指標で判定するか",
+      "ローカルLLM構築コストの見積精度",
+      "商用LLM依存をどこまで許容するか",
     ],
-    openQuestions: [
-      "実LLM接続時のProvider Adapterの責務範囲。",
-      "会話履歴保存の初期スキーマ設計。",
-      "発言を逐次ストリーミングにするかどうか。",
-    ],
-    recommendation:
-      "最初の土台では、会議UI・モックAPI・Docker・CI・READMEを整え、次のPRで永続化と実オーケストレーションの足場へ進むのが自然です。",
-  }),
+    nextSteps: ["追加検証の評価基準", "実装コストと依存範囲"],
+  },
 };
 
 const ROLE_STYLES = {
@@ -342,10 +345,11 @@ export function MeetingWorkspace() {
     con: pickModelLabel(debateAssignments.con),
     judge: pickModelLabel(debateAssignments.judge),
   };
-  const debateJudgmentContent = buildMockDebateJudgmentContent({
-    responses: result.responses,
-    labels: debateAssignmentLabels,
-  });
+  const synthesisDisplay = buildSynthesisDisplay(result.synthesis);
+  const debateJudgmentDisplay = buildDebateJudgmentDisplay(
+    result.debateJudgment,
+    debateAssignmentLabels,
+  );
 
   const timelineEntries: TimelineEntry[] = [
     {
@@ -395,7 +399,7 @@ export function MeetingWorkspace() {
               label: "ユーザー明示指示で生成",
               accentClass: "text-violet-900",
               markerClass: "bg-violet-500",
-              body: debateJudgmentContent.body,
+              body: debateJudgmentDisplay.body,
               meta: "debate_judgment / explicit trigger",
             },
           ]
@@ -420,7 +424,7 @@ export function MeetingWorkspace() {
               label: "ユーザー明示指示で生成",
               accentClass: "text-violet-900",
               markerClass: "bg-violet-500",
-              body: result.preparedSynthesis.body,
+              body: synthesisDisplay.body,
               meta: "synthesis / explicit trigger",
             },
           ]
@@ -550,8 +554,8 @@ export function MeetingWorkspace() {
 
                         <div className="grid gap-3">
                           {(entry.messageType === "synthesis"
-                            ? result.preparedSynthesis.sections
-                            : debateJudgmentContent.sections
+                            ? synthesisDisplay.sections
+                            : debateJudgmentDisplay.sections
                           ).map((section) => (
                             <section
                               key={section.title}
@@ -820,7 +824,7 @@ export function MeetingWorkspace() {
                     </div>
                   </div>
 
-                  {debateJudgmentContent.sections.map((section) => (
+                  {debateJudgmentDisplay.sections.map((section) => (
                     <section
                       key={section.title}
                       className={`rounded-2xl border px-4 py-4 ${section.tone}`}
@@ -893,7 +897,7 @@ export function MeetingWorkspace() {
                     </div>
                   </div>
 
-                  {result.preparedSynthesis.sections.map((section) => (
+                  {synthesisDisplay.sections.map((section) => (
                     <section
                       key={section.title}
                       className={`rounded-2xl border px-4 py-4 ${section.tone}`}
