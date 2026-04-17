@@ -57,3 +57,22 @@ export function buildConversationStateSnapshot(
     hint: STATE_HINTS[state],
   };
 }
+
+const SYNTHESIS_TRIGGERS: Record<"brainstorm" | "design_review", string[]> = {
+  brainstorm: ["統合して", "ここまでで整理して", "案をまとめて", "方向性を出して"],
+  design_review: ["統合して", "整理して", "合意点を出して", "論点をまとめて"],
+};
+
+export function isExplicitSynthesisTrigger(
+  input: string,
+  mode: MeetingMode,
+): boolean {
+  if (mode === "debate") {
+    return false;
+  }
+
+  const normalizedInput = input.trim();
+  return SYNTHESIS_TRIGGERS[mode].some((trigger) =>
+    normalizedInput.includes(trigger),
+  );
+}
