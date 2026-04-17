@@ -76,7 +76,7 @@ export interface MeetingRunResult {
   mode: MeetingMode;
   responses: RoleResponse[];
   synthesis: SynthesisResult;
-  debateJudgment: DebateJudgmentResult;
+  debateJudgment?: DebateJudgmentResult;
   generatedAt: string;
 }
 

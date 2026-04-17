@@ -177,7 +177,11 @@ async function runMockMeeting({
     mode,
     responses,
     synthesis,
-    debateJudgment: buildMockDebateJudgment(responses),
+    ...(mode === "debate"
+      ? {
+          debateJudgment: buildMockDebateJudgment(responses),
+        }
+      : {}),
     generatedAt: new Date().toISOString(),
   };
 }
