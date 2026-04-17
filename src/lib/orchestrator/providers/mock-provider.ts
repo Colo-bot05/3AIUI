@@ -1,9 +1,7 @@
 import type {
-  DebateAssignmentLabels,
+  DebateJudgmentResult,
   MeetingMode,
   MeetingRunResult,
-  PreparedDebateJudgmentContent,
-  PreparedSynthesisContent,
   RoleResponse,
   RunMeetingInput,
   SpeakerRole,
@@ -94,87 +92,21 @@ function extractLeadPoint(content: string) {
   return content.split("\n\n")[0] ?? content;
 }
 
-export function buildMockSynthesisContent(
-  synthesis: SynthesisResult,
-): PreparedSynthesisContent {
+function buildMockDebateJudgment(responses: RoleResponse[]): DebateJudgmentResult {
   return {
-    body: [
-      "合意事項",
-      ...synthesis.agreements.map((item) => `- ${item}`),
-      "",
-      "未決事項",
-      ...synthesis.openQuestions.map((item) => `- ${item}`),
-      "",
-      "推奨案",
-      synthesis.recommendation,
-    ].join("\n"),
-    sections: [
-      {
-        title: "合意事項",
-        tone: "border-orange-200 bg-orange-50/85",
-        items: synthesis.agreements,
-      },
-      {
-        title: "未決事項",
-        tone: "border-sky-200 bg-sky-50/85",
-        items: synthesis.openQuestions,
-      },
-      {
-        title: "推奨案",
-        tone: "border-violet-200 bg-violet-50/90",
-        body: synthesis.recommendation,
-      },
+    verdictHeadline: "追加検証付きで賛成側案を前進",
+    verdictDetail:
+      "現時点では「追加検証付きで賛成側の方向を前進させる」が妥当です。",
+    reasoning:
+      "賛成側は前進案を示し、反対側はリスク整理を提供しているため、結論を止めるより条件付きで進める方が意思決定しやすい状態です。",
+    proLeadPoint: extractLeadPoint(responses[0]?.content ?? ""),
+    conLeadPoint: extractLeadPoint(responses[1]?.content ?? ""),
+    openPoints: [
+      "追加検証をどの指標で判定するか",
+      "ローカルLLM構築コストの見積精度",
+      "商用LLM依存をどこまで許容するか",
     ],
-  };
-}
-
-export function buildMockDebateJudgmentContent({
-  responses,
-  labels,
-}: {
-  responses: RoleResponse[];
-  labels: DebateAssignmentLabels;
-}): PreparedDebateJudgmentContent {
-  return {
-    body: [
-      "判定",
-      `${labels.judge} の暫定判断: 追加検証付きで賛成側案を前進`,
-      "",
-      "次に確認すべきこと",
-      "- 追加検証の評価基準",
-      "- 実装コストと依存範囲",
-    ].join("\n"),
-    sections: [
-      {
-        title: "賛成側の要点",
-        tone: "border-orange-200 bg-orange-50/85",
-        items: [`${labels.pro}: ${extractLeadPoint(responses[0]?.content ?? "")}`],
-      },
-      {
-        title: "反対側の要点",
-        tone: "border-sky-200 bg-sky-50/85",
-        items: [`${labels.con}: ${extractLeadPoint(responses[1]?.content ?? "")}`],
-      },
-      {
-        title: "判定",
-        tone: "border-emerald-200 bg-emerald-50/90",
-        body: `${labels.judge} の暫定判断として、現時点では「追加検証付きで賛成側の方向を前進させる」が妥当です。`,
-      },
-      {
-        title: "判定理由",
-        tone: "border-violet-200 bg-violet-50/90",
-        body: "賛成側は前進案を示し、反対側はリスク整理を提供しているため、結論を止めるより条件付きで進める方が意思決定しやすい状態です。",
-      },
-      {
-        title: "残る論点",
-        tone: "border-zinc-200 bg-zinc-50/90",
-        items: [
-          "追加検証をどの指標で判定するか",
-          "ローカルLLM構築コストの見積精度",
-          "商用LLM依存をどこまで許容するか",
-        ],
-      },
-    ],
+    nextSteps: ["追加検証の評価基準", "実装コストと依存範囲"],
   };
 }
 
@@ -209,7 +141,7 @@ async function runMockMeeting({
     mode,
     responses,
     synthesis,
-    preparedSynthesis: buildMockSynthesisContent(synthesis),
+    debateJudgment: buildMockDebateJudgment(responses),
     generatedAt: new Date().toISOString(),
   };
 }
