@@ -64,7 +64,7 @@ npm install
 npm run dev
 ```
 
-ブラウザで http://localhost:3000 を開いてください。
+ブラウザで http://localhost:3001 を開いてください。
 
 ## Docker Desktop で起動する
 
@@ -77,7 +77,7 @@ docker compose up --build
 
 起動後のアクセス先:
 
-- App: http://localhost:3000
+- App: http://localhost:3001
 - PostgreSQL: `localhost:5432`
 
 この構成は、ローカルでは bind mount で開発しやすくしつつ、将来的に ECS Fargate へ寄せやすい「コンテナ前提」の土台を意識しています。
