@@ -3,7 +3,13 @@
 import { useState } from "react";
 
 import { MODE_OPTIONS } from "@/features/meeting/mode-config";
+import {
+  buildConversationStateSnapshot,
+  getAllowedStatesForMode,
+  getInitialConversationState,
+} from "@/features/meeting/state";
 import type {
+  ConversationState,
   MeetingMessageType,
   MeetingMode,
   MeetingRunResult,
@@ -138,6 +144,9 @@ function formatTimestamp(isoTimestamp: string) {
 export function MeetingWorkspace() {
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [mode, setMode] = useState<MeetingMode>("design_review");
+  const [conversationState, setConversationState] = useState<ConversationState>(
+    getInitialConversationState("design_review"),
+  );
   const [result, setResult] = useState<MeetingRunResult>(INITIAL_RESULT);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,6 +182,10 @@ export function MeetingWorkspace() {
   }
 
   const activeMode = MODE_OPTIONS.find((option) => option.value === mode) ?? MODE_OPTIONS[1];
+  const activeState = buildConversationStateSnapshot(mode, conversationState);
+  const stateCandidates = getAllowedStatesForMode(mode).map((state) =>
+    buildConversationStateSnapshot(mode, state),
+  );
   const activePlaceholder = PANEL_PLACEHOLDERS[mode];
 
   const timelineEntries: TimelineEntry[] = [
@@ -180,16 +193,11 @@ export function MeetingWorkspace() {
       id: "status",
       messageType: "system_status",
       title: "ワークスペース状態",
-      label: activeMode.timelineStatus,
+      label: activeState.label,
       accentClass: "text-zinc-700",
       markerClass: "bg-zinc-400",
-      body:
-        mode === "brainstorm"
-          ? "3AI はまだ結論を固定せず、案を広げる前提の表示です。統合メッセージはまだ生成していません。"
-          : mode === "debate"
-            ? "賛成・反対・審判の会話フローを表示するためのレイアウトです。判定はまだ実行していません。"
-            : "3AI が順番に論点を深掘りする想定の表示です。合意や統合はまだ確定していません。",
-      meta: "system_status",
+      body: activeState.hint,
+      meta: `system_status / ${activeState.state}`,
     },
     {
       id: "user-theme",
@@ -253,7 +261,7 @@ export function MeetingWorkspace() {
               <span
                 className={`rounded-full border px-4 py-2 text-sm font-semibold ${activeMode.panelTone}`}
               >
-                {activeMode.label} / {activeMode.timelineStatus}
+                {activeMode.label} / {activeState.label}
               </span>
               <span className="rounded-full border border-zinc-900/10 bg-white/80 px-4 py-2 text-sm text-zinc-600">
                 mock conversation
@@ -382,7 +390,10 @@ export function MeetingWorkspace() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setMode(option.value)}
+                      onClick={() => {
+                        setMode(option.value);
+                        setConversationState(getInitialConversationState(option.value));
+                      }}
                       className={`rounded-2xl border px-4 py-3 text-left transition ${
                         active
                           ? "border-zinc-950 bg-zinc-950 text-white shadow-sm"
@@ -398,7 +409,10 @@ export function MeetingWorkspace() {
                               : option.panelTone
                           }`}
                         >
-                          {option.timelineStatus}
+                          {buildConversationStateSnapshot(
+                            option.value,
+                            getInitialConversationState(option.value),
+                          ).label}
                         </span>
                       </div>
                       <div
@@ -483,12 +497,26 @@ export function MeetingWorkspace() {
                 <span
                   className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeMode.panelTone}`}
                 >
-                  {activeMode.timelineStatus}
+                  {activeState.label}
                 </span>
               </div>
               <p className="mt-3 text-sm leading-7 text-zinc-600">
-                表示上は現在状態を示していますが、内部の状態遷移はまだ実装していません。
+                {activeState.hint}
               </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {stateCandidates.map((candidate) => (
+                  <span
+                    key={candidate.state}
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-mono ${
+                      candidate.state === activeState.state
+                        ? "border-zinc-900/20 bg-zinc-900 text-white"
+                        : "border-zinc-900/10 bg-white text-zinc-500"
+                    }`}
+                  >
+                    {candidate.label}
+                  </span>
+                ))}
+              </div>
             </div>
 
             <div className="rounded-[1.5rem] border border-zinc-900/10 bg-white/75 p-4">
