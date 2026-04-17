@@ -5,6 +5,7 @@ import type {
   JudgeActionResult,
   MeetingActionInput,
   MeetingActionResult,
+  MeetingAttachment,
   MeetingMode,
   SpeakerRole,
   SynthesizeActionInput,
@@ -64,21 +65,39 @@ const TURN_PARAGRAPHS: Record<Exclude<SpeakerRole, "audit">, string[]> = {
   ],
 };
 
+function summarizeAttachments(attachments: MeetingAttachment[]): string {
+  if (attachments.length === 0) {
+    return "";
+  }
+  const first = attachments[0];
+  const names = attachments.map((a) => a.filename).join(" / ");
+  const excerpt = (first.excerpt || first.extractedText.slice(0, 200)).replace(
+    /\s+/g,
+    " ",
+  );
+  return `添付資料 (${attachments.length}件: ${names}) を前提に、冒頭では「${excerpt}」という記述を踏まえます。`;
+}
+
 function buildMockTurnContent(
   role: Exclude<SpeakerRole, "audit">,
   mode: MeetingMode,
   theme: string,
   turnIndex: number,
+  attachments: MeetingAttachment[],
 ): string {
   const modeGuide = MODE_GUIDANCE[mode];
   const meta = ROLE_META[role];
   const paragraphs = TURN_PARAGRAPHS[role];
   const base = paragraphs[turnIndex % paragraphs.length];
   const normalizedTheme = theme.trim() || "ローカルLLM構築を加速する3AI会議UI";
+  const attachmentSentence = summarizeAttachments(attachments);
   return [
     `${modeGuide.intro} テーマ「${normalizedTheme}」に対する ${meta.label} としての発言です（ターン ${turnIndex + 1}）。`,
+    attachmentSentence,
     base,
-  ].join("\n\n");
+  ]
+    .filter((line) => line !== "")
+    .join("\n\n");
 }
 
 async function produceMockTurn(
@@ -91,6 +110,7 @@ async function produceMockTurn(
     input.mode,
     input.theme,
     turnIndex,
+    input.attachments ?? [],
   );
   return {
     action: "continue",
@@ -111,6 +131,11 @@ async function produceMockSynthesis(
   const normalizedTheme =
     input.theme.trim() || "ローカルLLM構築を加速する3AI会議UI";
   const turnCount = input.history.length;
+  const attachments = input.attachments ?? [];
+  const attachmentAgreement =
+    attachments.length > 0
+      ? `添付資料 (${attachments.map((a) => a.filename).join(" / ")}) の記述を前提として議論に含める。`
+      : null;
   return {
     action: "synthesize",
     synthesis: {
@@ -118,6 +143,7 @@ async function produceMockSynthesis(
         `${modeGuide.agreementsLead}として、「${normalizedTheme}」は 3AI の役割分担を明示した会議 UI として扱う。`,
         "ユーザーが明示指示を出すまで、AI は最終結論を固定しない。",
         `モック provider でも ${turnCount} ターン分の会話を履歴として扱える境界を先に作った。`,
+        ...(attachmentAgreement ? [attachmentAgreement] : []),
       ],
       openQuestions: [
         "各ターンの応答をストリーミングに載せ替えるかどうか。",
@@ -136,20 +162,27 @@ async function produceMockJudgment(
   const realityTurns = input.history.filter((entry) => entry.role === "reality");
   const proLead = visionTurns[0]?.content.split("\n\n")[0] ?? "";
   const conLead = realityTurns[0]?.content.split("\n\n")[0] ?? "";
+  const attachments = input.attachments ?? [];
+  const attachmentReason =
+    attachments.length > 0
+      ? ` 添付資料 (${attachments.map((a) => a.filename).join(" / ")}) の記述も踏まえ、具体的な前提として扱った。`
+      : "";
   return {
     action: "judge",
     debateJudgment: {
       verdictHeadline: "追加検証付きで構想側案を前進",
       verdictDetail:
         "現時点では「追加検証付きで構想側の方向を前進させる」が妥当です。",
-      reasoning:
-        "構想側は前進案を示し、現実側はリスク整理を提供しているため、結論を止めるより条件付きで進める方が意思決定しやすい状態です。",
+      reasoning: `構想側は前進案を示し、現実側はリスク整理を提供しているため、結論を止めるより条件付きで進める方が意思決定しやすい状態です。${attachmentReason}`,
       proLeadPoint: proLead,
       conLeadPoint: conLead,
       openPoints: [
         "追加検証をどの指標で判定するか",
         "ローカルLLM構築コストの見積精度",
         "商用LLM依存をどこまで許容するか",
+        ...(attachments.length > 0
+          ? ["添付資料との整合をどの粒度で検証するか"]
+          : []),
       ],
       nextSteps: ["追加検証の評価基準", "実装コストと依存範囲"],
     },
