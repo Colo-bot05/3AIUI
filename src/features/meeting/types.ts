@@ -32,11 +32,35 @@ export interface SynthesisResult {
   recommendation: string;
 }
 
+export interface SummarySection {
+  title: string;
+  tone: string;
+  items?: string[];
+  body?: string;
+}
+
+export interface PreparedSynthesisContent {
+  body: string;
+  sections: SummarySection[];
+}
+
+export interface DebateAssignmentLabels {
+  pro: string;
+  con: string;
+  judge: string;
+}
+
+export interface PreparedDebateJudgmentContent {
+  body: string;
+  sections: SummarySection[];
+}
+
 export interface MeetingRunResult {
   theme: string;
   mode: MeetingMode;
   responses: RoleResponse[];
   synthesis: SynthesisResult;
+  preparedSynthesis: PreparedSynthesisContent;
   generatedAt: string;
 }
 

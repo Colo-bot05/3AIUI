@@ -1,9 +1,13 @@
 import type {
+  DebateAssignmentLabels,
   MeetingMode,
   MeetingRunResult,
+  PreparedDebateJudgmentContent,
+  PreparedSynthesisContent,
   RoleResponse,
   RunMeetingInput,
   SpeakerRole,
+  SynthesisResult,
 } from "@/features/meeting/types";
 
 const ROLE_META: Record<SpeakerRole, { label: string; viewpoint: string; emphasis: string }> = {
@@ -84,6 +88,94 @@ function buildRoleContent(
   };
 }
 
+function extractLeadPoint(content: string) {
+  return content.split("\n\n")[0] ?? content;
+}
+
+export function buildMockSynthesisContent(
+  synthesis: SynthesisResult,
+): PreparedSynthesisContent {
+  return {
+    body: [
+      "合意事項",
+      ...synthesis.agreements.map((item) => `- ${item}`),
+      "",
+      "未決事項",
+      ...synthesis.openQuestions.map((item) => `- ${item}`),
+      "",
+      "推奨案",
+      synthesis.recommendation,
+    ].join("\n"),
+    sections: [
+      {
+        title: "合意事項",
+        tone: "border-orange-200 bg-orange-50/85",
+        items: synthesis.agreements,
+      },
+      {
+        title: "未決事項",
+        tone: "border-sky-200 bg-sky-50/85",
+        items: synthesis.openQuestions,
+      },
+      {
+        title: "推奨案",
+        tone: "border-violet-200 bg-violet-50/90",
+        body: synthesis.recommendation,
+      },
+    ],
+  };
+}
+
+export function buildMockDebateJudgmentContent({
+  responses,
+  labels,
+}: {
+  responses: RoleResponse[];
+  labels: DebateAssignmentLabels;
+}): PreparedDebateJudgmentContent {
+  return {
+    body: [
+      "判定",
+      `${labels.judge} の暫定判断: 追加検証付きで賛成側案を前進`,
+      "",
+      "次に確認すべきこと",
+      "- 追加検証の評価基準",
+      "- 実装コストと依存範囲",
+    ].join("\n"),
+    sections: [
+      {
+        title: "賛成側の要点",
+        tone: "border-orange-200 bg-orange-50/85",
+        items: [`${labels.pro}: ${extractLeadPoint(responses[0]?.content ?? "")}`],
+      },
+      {
+        title: "反対側の要点",
+        tone: "border-sky-200 bg-sky-50/85",
+        items: [`${labels.con}: ${extractLeadPoint(responses[1]?.content ?? "")}`],
+      },
+      {
+        title: "判定",
+        tone: "border-emerald-200 bg-emerald-50/90",
+        body: `${labels.judge} の暫定判断として、現時点では「追加検証付きで賛成側の方向を前進させる」が妥当です。`,
+      },
+      {
+        title: "判定理由",
+        tone: "border-violet-200 bg-violet-50/90",
+        body: "賛成側は前進案を示し、反対側はリスク整理を提供しているため、結論を止めるより条件付きで進める方が意思決定しやすい状態です。",
+      },
+      {
+        title: "残る論点",
+        tone: "border-zinc-200 bg-zinc-50/90",
+        items: [
+          "追加検証をどの指標で判定するか",
+          "ローカルLLM構築コストの見積精度",
+          "商用LLM依存をどこまで許容するか",
+        ],
+      },
+    ],
+  };
+}
+
 export async function runMockMeeting({
   theme,
   mode,
@@ -96,24 +188,26 @@ export async function runMockMeeting({
     buildRoleContent("reality", normalizedTheme, mode),
     buildRoleContent("audit", normalizedTheme, mode),
   ];
+  const synthesis: SynthesisResult = {
+    agreements: [
+      `${modeGuide.agreementsLead}として、3AIの役割を明示した会議UIにする。`,
+      "初回はモックデータで成立させ、UI層とAPI層の境界を先に作る。",
+      "将来のAWS/ECS移行を見据え、Docker・環境変数・PostgreSQL前提の土台を先に置く。",
+    ],
+    openQuestions: [
+      "各AIの発言を逐次生成にするか、まとめて返すか。",
+      "会話履歴保存をRDB中心にするか、イベントログ中心にするか。",
+      "実LLM接続時に各Providerの出力差をどこまで統一フォーマットへ寄せるか。",
+    ],
+    recommendation: `${modeGuide.recommendationLead}として、まずは単一画面の会議UI、モックorchestrator API、CI、Docker、READMEまでを1セットで整えるのが最適です。`,
+  };
 
   return {
     theme: normalizedTheme,
     mode,
     responses,
-    synthesis: {
-      agreements: [
-        `${modeGuide.agreementsLead}として、3AIの役割を明示した会議UIにする。`,
-        "初回はモックデータで成立させ、UI層とAPI層の境界を先に作る。",
-        "将来のAWS/ECS移行を見据え、Docker・環境変数・PostgreSQL前提の土台を先に置く。",
-      ],
-      openQuestions: [
-        "各AIの発言を逐次生成にするか、まとめて返すか。",
-        "会話履歴保存をRDB中心にするか、イベントログ中心にするか。",
-        "実LLM接続時に各Providerの出力差をどこまで統一フォーマットへ寄せるか。",
-      ],
-      recommendation: `${modeGuide.recommendationLead}として、まずは単一画面の会議UI、モックorchestrator API、CI、Docker、READMEまでを1セットで整えるのが最適です。`,
-    },
+    synthesis,
+    preparedSynthesis: buildMockSynthesisContent(synthesis),
     generatedAt: new Date().toISOString(),
   };
 }

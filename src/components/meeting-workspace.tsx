@@ -20,6 +20,10 @@ import type {
   MeetingRunResult,
   SpeakerRole,
 } from "@/features/meeting/types";
+import {
+  buildMockDebateJudgmentContent,
+  buildMockSynthesisContent,
+} from "@/lib/orchestrator/mock-orchestrator";
 import { inMemorySessionRepository } from "@/lib/session/in-memory-session-repository";
 
 const DEFAULT_THEME =
@@ -69,6 +73,20 @@ const INITIAL_RESULT: MeetingRunResult = {
     recommendation:
       "最初の土台では、会議UI・モックAPI・Docker・CI・READMEを整え、次のPRで永続化と実オーケストレーションの足場へ進むのが自然です。",
   },
+  preparedSynthesis: buildMockSynthesisContent({
+    agreements: [
+      "3AIの役割が一目で分かるUIにする。",
+      "統合結果エリアを画面の主役の1つとして扱う。",
+      "モック実装でもAPI境界を作って将来差し替えやすくする。",
+    ],
+    openQuestions: [
+      "実LLM接続時のProvider Adapterの責務範囲。",
+      "会話履歴保存の初期スキーマ設計。",
+      "発言を逐次ストリーミングにするかどうか。",
+    ],
+    recommendation:
+      "最初の土台では、会議UI・モックAPI・Docker・CI・READMEを整え、次のPRで永続化と実オーケストレーションの足場へ進むのが自然です。",
+  }),
 };
 
 const ROLE_STYLES = {
@@ -152,13 +170,6 @@ type TimelineEntry = {
   side?: "left" | "right";
 };
 
-type SummarySection = {
-  title: string;
-  tone: string;
-  items?: string[];
-  body?: string;
-};
-
 function formatTimestamp(isoTimestamp: string) {
   return new Intl.DateTimeFormat("ja-JP", {
     hour: "2-digit",
@@ -168,10 +179,6 @@ function formatTimestamp(isoTimestamp: string) {
 
 function pickModelLabel(value: DebateModel | "") {
   return DEBATE_MODELS.find((item) => item.value === value)?.label ?? "未選択";
-}
-
-function extractLeadPoint(content: string) {
-  return content.split("\n\n")[0] ?? content;
 }
 
 export function MeetingWorkspace() {
@@ -330,73 +337,15 @@ export function MeetingWorkspace() {
     `${DEBATE_ROLE_LABELS.con}: ${pickModelLabel(debateAssignments.con)}`,
     `${DEBATE_ROLE_LABELS.judge}: ${pickModelLabel(debateAssignments.judge)}`,
   ].join("\n");
-
-  const synthesisBody = [
-    "合意事項",
-    ...result.synthesis.agreements.map((item) => `- ${item}`),
-    "",
-    "未決事項",
-    ...result.synthesis.openQuestions.map((item) => `- ${item}`),
-    "",
-    "推奨案",
-    result.synthesis.recommendation,
-  ].join("\n");
-
-  const synthesisSections: SummarySection[] = [
-    {
-      title: "合意事項",
-      tone: "border-orange-200 bg-orange-50/85",
-      items: result.synthesis.agreements,
-    },
-    {
-      title: "未決事項",
-      tone: "border-sky-200 bg-sky-50/85",
-      items: result.synthesis.openQuestions,
-    },
-    {
-      title: "推奨案",
-      tone: "border-violet-200 bg-violet-50/90",
-      body: result.synthesis.recommendation,
-    },
-  ];
-
-  const debateJudgmentSections: SummarySection[] = [
-    {
-      title: "賛成側の要点",
-      tone: "border-orange-200 bg-orange-50/85",
-      items: [
-        `${pickModelLabel(debateAssignments.pro)}: ${extractLeadPoint(result.responses[0]?.content ?? "")}`,
-      ],
-    },
-    {
-      title: "反対側の要点",
-      tone: "border-sky-200 bg-sky-50/85",
-      items: [
-        `${pickModelLabel(debateAssignments.con)}: ${extractLeadPoint(result.responses[1]?.content ?? "")}`,
-      ],
-    },
-    {
-      title: "判定",
-      tone: "border-emerald-200 bg-emerald-50/90",
-      body: `${pickModelLabel(
-        debateAssignments.judge,
-      )} の暫定判断として、現時点では「追加検証付きで賛成側の方向を前進させる」が妥当です。`,
-    },
-    {
-      title: "判定理由",
-      tone: "border-violet-200 bg-violet-50/90",
-      body: "賛成側は前進案を示し、反対側はリスク整理を提供しているため、結論を止めるより条件付きで進める方が意思決定しやすい状態です。",
-    },
-    {
-      title: "残る論点",
-      tone: "border-zinc-200 bg-zinc-50/90",
-      items: [
-        "追加検証をどの指標で判定するか",
-        "ローカルLLM構築コストの見積精度",
-        "商用LLM依存をどこまで許容するか",
-      ],
-    },
-  ];
+  const debateAssignmentLabels = {
+    pro: pickModelLabel(debateAssignments.pro),
+    con: pickModelLabel(debateAssignments.con),
+    judge: pickModelLabel(debateAssignments.judge),
+  };
+  const debateJudgmentContent = buildMockDebateJudgmentContent({
+    responses: result.responses,
+    labels: debateAssignmentLabels,
+  });
 
   const timelineEntries: TimelineEntry[] = [
     {
@@ -446,14 +395,7 @@ export function MeetingWorkspace() {
               label: "ユーザー明示指示で生成",
               accentClass: "text-violet-900",
               markerClass: "bg-violet-500",
-              body: [
-                "判定",
-                `${pickModelLabel(debateAssignments.judge)} の暫定判断: 追加検証付きで賛成側案を前進`,
-                "",
-                "次に確認すべきこと",
-                "- 追加検証の評価基準",
-                "- 実装コストと依存範囲",
-              ].join("\n"),
+              body: debateJudgmentContent.body,
               meta: "debate_judgment / explicit trigger",
             },
           ]
@@ -478,7 +420,7 @@ export function MeetingWorkspace() {
               label: "ユーザー明示指示で生成",
               accentClass: "text-violet-900",
               markerClass: "bg-violet-500",
-              body: synthesisBody,
+              body: result.preparedSynthesis.body,
               meta: "synthesis / explicit trigger",
             },
           ]
@@ -608,8 +550,8 @@ export function MeetingWorkspace() {
 
                         <div className="grid gap-3">
                           {(entry.messageType === "synthesis"
-                            ? synthesisSections
-                            : debateJudgmentSections
+                            ? result.preparedSynthesis.sections
+                            : debateJudgmentContent.sections
                           ).map((section) => (
                             <section
                               key={section.title}
@@ -865,7 +807,7 @@ export function MeetingWorkspace() {
                         pro
                       </div>
                       <div className="mt-2 text-sm font-semibold text-orange-950">
-                        {pickModelLabel(debateAssignments.pro)}
+                        {debateAssignmentLabels.pro}
                       </div>
                     </div>
                     <div className="rounded-2xl border border-sky-200 bg-sky-50/80 px-3 py-3">
@@ -873,12 +815,12 @@ export function MeetingWorkspace() {
                         con
                       </div>
                       <div className="mt-2 text-sm font-semibold text-sky-950">
-                        {pickModelLabel(debateAssignments.con)}
+                        {debateAssignmentLabels.con}
                       </div>
                     </div>
                   </div>
 
-                  {debateJudgmentSections.map((section) => (
+                  {debateJudgmentContent.sections.map((section) => (
                     <section
                       key={section.title}
                       className={`rounded-2xl border px-4 py-4 ${section.tone}`}
@@ -951,7 +893,7 @@ export function MeetingWorkspace() {
                     </div>
                   </div>
 
-                  {synthesisSections.map((section) => (
+                  {result.preparedSynthesis.sections.map((section) => (
                     <section
                       key={section.title}
                       className={`rounded-2xl border px-4 py-4 ${section.tone}`}
