@@ -44,6 +44,7 @@ class InMemorySessionRepository implements SessionRepository {
       mode: input.mode,
       prompt: input.prompt,
       conversationState: input.conversationState,
+      attachmentContext: input.attachmentContext,
       createdAt: new Date().toISOString(),
     };
 
