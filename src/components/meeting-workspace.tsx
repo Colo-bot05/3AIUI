@@ -134,6 +134,13 @@ export function MeetingWorkspace() {
     } catch {
       // sessionStorage quota or disabled — state still updates.
     }
+    fetch("/api/prompt-settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rolePrompts: next }),
+    }).catch(() => {
+      // DB optional — UI already reflects the change via state + sessionStorage.
+    });
   }
 
   async function ensureSessionId() {
@@ -217,6 +224,12 @@ export function MeetingWorkspace() {
     if (!removedAttachment) {
       return;
     }
+
+    fetch(`/api/attachments/${encodeURIComponent(attachmentId)}`, {
+      method: "DELETE",
+    }).catch(() => {
+      // DB optional — UI already reflects the removal.
+    });
 
     await inMemorySessionRepository.appendEntry({
       sessionId: await ensureSessionId(),
