@@ -94,6 +94,7 @@ export interface MeetingActionBaseInput {
   attachments?: MeetingAttachment[];
   rolePrompts?: RolePrompts;
   history: RoleResponse[];
+  meetingId?: string;
 }
 
 export interface ContinueActionInput extends MeetingActionBaseInput {
@@ -118,16 +119,19 @@ export type MeetingActionInput =
 export interface ContinueActionResult {
   action: "continue";
   turn: RoleResponse;
+  meetingId?: string;
 }
 
 export interface SynthesizeActionResult {
   action: "synthesize";
   synthesis: SynthesisResult;
+  meetingId?: string;
 }
 
 export interface JudgeActionResult {
   action: "judge";
   debateJudgment: DebateJudgmentResult;
+  meetingId?: string;
 }
 
 export type MeetingActionResult =
