@@ -8,7 +8,15 @@ export async function runMigrationsAtStartup(): Promise<void> {
     console.log("[migrate] DATABASE_URL not set, skipping");
     return;
   }
-  const sql = postgres(url, { max: 1, onnotice: () => {} });
+  const sql = postgres(url, {
+    max: 1,
+    onnotice: () => {},
+    ssl:
+      process.env.DATABASE_SSL === "require" ||
+      process.env.APP_ENV === "production"
+        ? "require"
+        : undefined,
+  });
   const db = drizzle(sql);
   try {
     await migrate(db, { migrationsFolder: "./drizzle" });

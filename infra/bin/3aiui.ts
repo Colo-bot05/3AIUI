@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import "source-map-support/register";
 import * as cdk from "aws-cdk-lib";
 
 import { AppStack } from "../lib/app-stack";
@@ -18,8 +17,10 @@ const env = {
 const dbStack = new DbStack(app, "ThreeAiUiDbStack", { env });
 new AppStack(app, "ThreeAiUiAppStack", {
   env,
-  vpc: dbStack.vpc,
-  dbInstance: dbStack.dbInstance,
+  ecrRepo: dbStack.ecrRepo,
+  anthropicSecret: dbStack.anthropicSecret,
   dbSecret: dbStack.dbSecret,
-  appConnectorSg: dbStack.appConnectorSg,
+  vpcConnector: dbStack.vpcConnector,
+  accessRole: dbStack.accessRole,
+  instanceRole: dbStack.instanceRole,
 });

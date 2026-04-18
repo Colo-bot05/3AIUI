@@ -17,7 +17,15 @@ export function getDatabaseClient(): DatabaseClient | null {
     return cachedClient;
   }
 
-  const sql = postgres(url, { max: 4, idle_timeout: 20 });
+  const sql = postgres(url, {
+    max: 4,
+    idle_timeout: 20,
+    ssl:
+      process.env.DATABASE_SSL === "require" ||
+      process.env.APP_ENV === "production"
+        ? "require"
+        : undefined,
+  });
   cachedClient = drizzle(sql, { schema });
   return cachedClient;
 }
