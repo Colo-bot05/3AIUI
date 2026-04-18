@@ -4,6 +4,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -46,3 +47,38 @@ export const auditOutputs = pgTable("audit_outputs", {
     .defaultNow()
     .notNull(),
 });
+
+export const attachments = pgTable("attachments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  meetingId: uuid("meeting_id").references(() => meetings.id, {
+    onDelete: "cascade",
+  }),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  extractStatus: text("extract_status").notNull(),
+  previewText: text("preview_text"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const promptSettings = pgTable(
+  "prompt_settings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    meetingId: uuid("meeting_id").references(() => meetings.id, {
+      onDelete: "cascade",
+    }),
+    role: text("role").notNull(),
+    promptText: text("prompt_text").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("prompt_settings_meeting_role_unique")
+      .on(table.meetingId, table.role)
+      .nullsNotDistinct(),
+  ],
+);

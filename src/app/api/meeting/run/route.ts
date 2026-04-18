@@ -10,7 +10,9 @@ import type {
 import {
   appendTurn,
   createMeeting,
+  linkOrphanAttachments,
   saveAuditOutput,
+  saveMeetingPromptSnapshot,
 } from "@/lib/db/repository";
 import { runMeetingAction } from "@/lib/orchestrator/provider-registry";
 
@@ -28,10 +30,17 @@ async function ensureMeetingId(
     // persisted. Skip DB writes rather than creating a half-linked row.
     return null;
   }
-  return createMeeting({
+  const meetingId = await createMeeting({
     topic: input.theme.trim() || "Untitled meeting",
     mode: input.mode,
   });
+  if (meetingId) {
+    await linkOrphanAttachments(meetingId);
+    if (input.rolePrompts) {
+      await saveMeetingPromptSnapshot(meetingId, input.rolePrompts);
+    }
+  }
+  return meetingId;
 }
 
 async function persistContinue(
