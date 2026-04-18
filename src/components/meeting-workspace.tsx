@@ -23,14 +23,17 @@ import type {
   MeetingAttachment,
   MeetingActionInput,
   MeetingActionResult,
+  MeetingDetail,
   MeetingMode,
   MeetingRunResult,
+  MeetingSummary,
   RolePrompts,
   SpeakerRole,
 } from "@/features/meeting/types";
 import { inMemorySessionRepository } from "@/lib/session/in-memory-session-repository";
 
 import { ControlSidebar } from "./meeting-workspace/control-sidebar";
+import { HistorySidebar } from "./meeting-workspace/history-sidebar";
 import { PromptSettingsPanel } from "./meeting-workspace/prompt-settings-panel";
 import {
   DEBATE_ROLE_LABELS,
@@ -113,6 +116,9 @@ export function MeetingWorkspace() {
   const [isPromptSettingsOpen, setIsPromptSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [meetingsList, setMeetingsList] = useState<MeetingSummary[]>([]);
+  const [viewingMeetingId, setViewingMeetingId] = useState<string | null>(null);
+  const viewOnly = viewingMeetingId !== null;
   const sessionIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const meetingIdRef = useRef<string | null>(null);
@@ -123,6 +129,126 @@ export function MeetingWorkspace() {
       setRolePrompts(stored);
     }
   }, []);
+
+  async function refreshMeetingsList() {
+    try {
+      const response = await fetch("/api/meetings");
+      if (!response.ok) {
+        return;
+      }
+      const data = (await response.json()) as { meetings?: MeetingSummary[] };
+      setMeetingsList(data.meetings ?? []);
+    } catch {
+      // DB optional — sidebar stays empty.
+    }
+  }
+
+  useEffect(() => {
+    void refreshMeetingsList();
+  }, []);
+
+  async function handleSelectMeeting(id: string) {
+    if (id === viewingMeetingId) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/meetings/${encodeURIComponent(id)}`);
+      if (!response.ok) {
+        return;
+      }
+      const detail = (await response.json()) as MeetingDetail;
+      const responses = detail.turns.map((turn) => ({
+        role: turn.role,
+        label:
+          turn.role === "vision"
+            ? "構想AI"
+            : turn.role === "reality"
+              ? "現実AI"
+              : "監査AI",
+        viewpoint:
+          turn.role === "vision"
+            ? "可能性を押し広げる提案役"
+            : turn.role === "reality"
+              ? "実装・運用の現実性を見る実務役"
+              : "抜け漏れやリスクを止める監査役",
+        emphasis:
+          turn.role === "vision"
+            ? "新しい価値の打ち出し"
+            : turn.role === "reality"
+              ? "実装順序とコスト感"
+              : "失敗条件の先回り",
+        content: turn.content,
+      }));
+      setTheme(detail.topic);
+      setSubmittedPrompt(detail.topic);
+      setMode(detail.mode);
+      setConversationState(
+        detail.debateJudgment
+          ? "judged"
+          : detail.synthesis
+            ? "synthesized"
+            : getInitialConversationState(detail.mode),
+      );
+      setResult({
+        theme: detail.topic,
+        mode: detail.mode,
+        responses,
+        synthesis: detail.synthesis ?? undefined,
+        debateJudgment: detail.debateJudgment ?? undefined,
+        generatedAt: detail.updatedAt,
+      });
+      setLastDiscussionMode(detail.mode);
+      setAttachments(
+        detail.attachments.map((att) => ({
+          id: att.id,
+          filename: att.filename,
+          extension: (att.filename.split(".").pop()?.toLowerCase() ??
+            "txt") as WorkspaceAttachmentItem["extension"],
+          mimeType: att.mimeType,
+          size: att.sizeBytes,
+          extractedText: att.previewText ?? "",
+          excerpt: att.previewText ?? "",
+          status:
+            att.extractStatus === "ready"
+              ? "ready"
+              : "error",
+          error:
+            att.extractStatus === "format_error"
+              ? "対応していないファイル形式です。"
+              : att.extractStatus === "extract_failed"
+                ? "テキストを抽出できませんでした。"
+                : undefined,
+        })),
+      );
+      if (detail.rolePrompts) {
+        setRolePrompts(detail.rolePrompts);
+      }
+      meetingIdRef.current = detail.id;
+      setViewingMeetingId(detail.id);
+      setError(null);
+    } catch {
+      setError("会議履歴の読み込みに失敗しました。");
+    }
+  }
+
+  function handleStartNewMeeting() {
+    setTheme(DEFAULT_THEME);
+    setSubmittedPrompt(DEFAULT_THEME);
+    setMode("design_review");
+    setConversationState(getInitialConversationState("design_review"));
+    setResult({
+      theme: DEFAULT_THEME,
+      mode: "design_review",
+      responses: [],
+      generatedAt: new Date().toISOString(),
+    });
+    setLastDiscussionMode("design_review");
+    setAttachments([]);
+    setDebateAssignments(INITIAL_DEBATE_ASSIGNMENTS);
+    meetingIdRef.current = null;
+    setViewingMeetingId(null);
+    setError(null);
+  }
 
   function handleSaveRolePrompts(next: RolePrompts) {
     setRolePrompts(next);
@@ -263,6 +389,9 @@ export function MeetingWorkspace() {
   }
 
   async function handleRun(action: WorkspaceAction) {
+    if (viewOnly) {
+      return;
+    }
     const freshRolePrompts = loadRolePromptsFromStorage() ?? rolePrompts;
     if (!areRolePromptsEqual(freshRolePrompts, rolePrompts)) {
       setRolePrompts(freshRolePrompts);
@@ -418,6 +547,7 @@ export function MeetingWorkspace() {
         conversationState: nextConversationState,
         attachmentContext: buildSessionAttachmentContext(readyAttachments),
       });
+      void refreshMeetingsList();
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -463,10 +593,12 @@ export function MeetingWorkspace() {
     mode !== "debate" && conversationState === "synthesized";
   const hasJudgment = mode === "debate" && conversationState === "judged";
   const canContinueDiscussion =
+    !viewOnly &&
     !loading &&
     (mode !== "debate" ||
       (!hasIncompleteDebateAssignments && !hasDuplicateDebateAssignments));
   const canFinalizeDiscussion =
+    !viewOnly &&
     !loading &&
     result.responses.length > 0 &&
     lastDiscussionMode === mode &&
@@ -517,7 +649,14 @@ export function MeetingWorkspace() {
   });
 
   return (
-    <div className="grid gap-6 pb-8 xl:grid-cols-[minmax(0,1.35fr)_380px]">
+    <div className="grid gap-6 pb-8 xl:grid-cols-[280px_minmax(0,1.35fr)_380px]">
+      <HistorySidebar
+        meetings={meetingsList}
+        activeMeetingId={viewingMeetingId}
+        onSelect={handleSelectMeeting}
+        onStartNewMeeting={handleStartNewMeeting}
+      />
+
       <TimelinePanel
         activeMode={activeMode}
         activeState={activeState}
@@ -558,6 +697,7 @@ export function MeetingWorkspace() {
         debateJudgmentDisplay={debateJudgmentDisplay}
         debateAssignmentLabels={debateAssignmentLabels}
         result={result}
+        viewOnly={viewOnly}
         onOpenPromptSettings={() => setIsPromptSettingsOpen(true)}
       />
 

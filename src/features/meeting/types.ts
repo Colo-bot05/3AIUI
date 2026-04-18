@@ -139,6 +139,41 @@ export type MeetingActionResult =
   | SynthesizeActionResult
   | JudgeActionResult;
 
+export interface MeetingSummary {
+  id: string;
+  topic: string;
+  mode: MeetingMode;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MeetingAttachmentMeta {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  extractStatus: string;
+  previewText: string | null;
+}
+
+export interface MeetingDetail {
+  id: string;
+  topic: string;
+  mode: MeetingMode;
+  createdAt: string;
+  updatedAt: string;
+  turns: Array<{
+    turnIndex: number;
+    role: SpeakerRole;
+    content: string;
+    createdAt: string;
+  }>;
+  synthesis: SynthesisResult | null;
+  debateJudgment: DebateJudgmentResult | null;
+  attachments: MeetingAttachmentMeta[];
+  rolePrompts: RolePrompts | null;
+}
+
 export interface ConversationStateSnapshot {
   mode: MeetingMode;
   state: ConversationState;
