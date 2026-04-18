@@ -1,9 +1,11 @@
-import { eq, isNull, sql } from "drizzle-orm";
+import { asc, desc, eq, isNull, sql } from "drizzle-orm";
 
 import type {
   DebateAssignmentLabels,
   DebateJudgmentResult,
+  MeetingDetail,
   MeetingMode,
+  MeetingSummary,
   RolePrompts,
   SpeakerRole,
   SynthesisResult,
@@ -246,5 +248,115 @@ export async function saveAuditOutput(input: {
       .where(eq(meetings.id, input.meetingId));
   } catch (error) {
     warn("saveAuditOutput", error);
+  }
+}
+
+export async function listMeetings(limit = 50): Promise<MeetingSummary[]> {
+  const db = getDatabaseClient();
+  if (!db) {
+    return [];
+  }
+  try {
+    const rows = await db
+      .select({
+        id: meetings.id,
+        topic: meetings.topic,
+        mode: meetings.mode,
+        createdAt: meetings.createdAt,
+        updatedAt: meetings.updatedAt,
+      })
+      .from(meetings)
+      .orderBy(desc(meetings.createdAt))
+      .limit(limit);
+    return rows.map((row) => ({
+      id: row.id,
+      topic: row.topic,
+      mode: row.mode as MeetingSummary["mode"],
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    }));
+  } catch (error) {
+    warn("listMeetings", error);
+    return [];
+  }
+}
+
+export async function getMeetingById(id: string): Promise<MeetingDetail | null> {
+  const db = getDatabaseClient();
+  if (!db) {
+    return null;
+  }
+  try {
+    const [meetingRow] = await db
+      .select()
+      .from(meetings)
+      .where(eq(meetings.id, id))
+      .limit(1);
+    if (!meetingRow) {
+      return null;
+    }
+    const turnRows = await db
+      .select()
+      .from(turns)
+      .where(eq(turns.meetingId, id))
+      .orderBy(asc(turns.turnIndex));
+    const auditRows = await db
+      .select()
+      .from(auditOutputs)
+      .where(eq(auditOutputs.meetingId, id));
+    const attachmentRows = await db
+      .select()
+      .from(attachments)
+      .where(eq(attachments.meetingId, id));
+    const promptRows = await db
+      .select()
+      .from(promptSettings)
+      .where(eq(promptSettings.meetingId, id));
+
+    const synthesisRow = auditRows.find((row) => row.kind === "synthesis");
+    const judgeRow = auditRows.find((row) => row.kind === "judge");
+
+    const promptsByRole = new Map(
+      promptRows.map((row) => [row.role, row.promptText]),
+    );
+    const rolePrompts: RolePrompts | null =
+      promptsByRole.has("vision") &&
+      promptsByRole.has("reality") &&
+      promptsByRole.has("audit")
+        ? {
+            vision: promptsByRole.get("vision")!,
+            reality: promptsByRole.get("reality")!,
+            audit: promptsByRole.get("audit")!,
+          }
+        : null;
+
+    return {
+      id: meetingRow.id,
+      topic: meetingRow.topic,
+      mode: meetingRow.mode as MeetingDetail["mode"],
+      createdAt: meetingRow.createdAt.toISOString(),
+      updatedAt: meetingRow.updatedAt.toISOString(),
+      turns: turnRows.map((row) => ({
+        turnIndex: row.turnIndex,
+        role: row.role as SpeakerRole,
+        content: row.content,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      synthesis: (synthesisRow?.content as SynthesisResult | undefined) ?? null,
+      debateJudgment:
+        (judgeRow?.content as DebateJudgmentResult | undefined) ?? null,
+      attachments: attachmentRows.map((row) => ({
+        id: row.id,
+        filename: row.filename,
+        mimeType: row.mimeType,
+        sizeBytes: row.sizeBytes,
+        extractStatus: row.extractStatus,
+        previewText: row.previewText,
+      })),
+      rolePrompts,
+    };
+  } catch (error) {
+    warn("getMeetingById", error);
+    return null;
   }
 }

@@ -60,6 +60,7 @@ export interface ControlSidebarProps {
   debateJudgmentDisplay: DebateJudgmentDisplay | null;
   debateAssignmentLabels: DebateAssignmentLabels;
   result: MeetingRunResult;
+  viewOnly: boolean;
   onOpenPromptSettings: () => void;
 }
 
@@ -92,6 +93,7 @@ export function ControlSidebar({
   debateJudgmentDisplay,
   debateAssignmentLabels,
   result,
+  viewOnly,
   onOpenPromptSettings,
 }: ControlSidebarProps) {
   return (
@@ -114,9 +116,15 @@ export function ControlSidebar({
               value={theme}
               onChange={(event) => onThemeChange(event.target.value)}
               rows={4}
-              className="mt-2 w-full resize-none rounded-2xl border border-zinc-900/10 bg-white px-4 py-3 text-sm leading-7 text-zinc-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
+              disabled={viewOnly}
+              className="mt-2 w-full resize-none rounded-2xl border border-zinc-900/10 bg-white px-4 py-3 text-sm leading-7 text-zinc-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500"
               placeholder="議論したいテーマを入力"
             />
+            {viewOnly ? (
+              <p className="mt-2 text-[11px] leading-5 text-zinc-500">
+                閲覧モード中。「+ 新しい会議」で編集を再開できます。
+              </p>
+            ) : null}
           </div>
 
           <AttachmentPanel
@@ -137,7 +145,8 @@ export function ControlSidebar({
                     key={option.value}
                     type="button"
                     onClick={() => onModeChange(option.value)}
-                    className={`rounded-2xl border px-4 py-3 text-left transition ${
+                    disabled={viewOnly}
+                    className={`rounded-2xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
                       active
                         ? "border-zinc-950 bg-zinc-950 text-white shadow-sm"
                         : "border-zinc-900/10 bg-white text-zinc-600 hover:border-zinc-900/20 hover:bg-zinc-50"
@@ -182,7 +191,8 @@ export function ControlSidebar({
               <button
                 type="button"
                 onClick={onOpenPromptSettings}
-                className="rounded-full border border-zinc-900/10 bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                disabled={viewOnly}
+                className="rounded-full border border-zinc-900/10 bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
               >
                 編集
               </button>
