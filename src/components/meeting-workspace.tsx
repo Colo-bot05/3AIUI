@@ -115,6 +115,7 @@ export function MeetingWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const meetingIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const stored = loadRolePromptsFromStorage();
@@ -233,12 +234,19 @@ export function MeetingWorkspace() {
     const response = await fetch("/api/meeting/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        meetingId: meetingIdRef.current ?? undefined,
+      }),
     });
     if (!response.ok) {
       throw new Error("会議の生成に失敗しました。");
     }
-    return (await response.json()) as MeetingActionResult;
+    const result = (await response.json()) as MeetingActionResult;
+    if (result.meetingId) {
+      meetingIdRef.current = result.meetingId;
+    }
+    return result;
   }
 
   async function handleRun(action: WorkspaceAction) {
@@ -417,6 +425,7 @@ export function MeetingWorkspace() {
       responses: [],
       generatedAt: new Date().toISOString(),
     }));
+    meetingIdRef.current = null;
     setError(null);
   }
 
