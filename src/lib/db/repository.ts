@@ -27,7 +27,19 @@ export type AttachmentExtractStatus =
 
 function warn(label: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[db] ${label} failed: ${message}`);
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code: unknown }).code)
+      : undefined;
+  const cause =
+    error instanceof Error && error.cause
+      ? error.cause instanceof Error
+        ? error.cause.message
+        : String(error.cause)
+      : undefined;
+  console.warn(
+    `[db] ${label} failed: ${message}${code ? ` (code=${code})` : ""}${cause ? ` cause=${cause}` : ""}`,
+  );
 }
 
 export async function createMeeting(input: {
