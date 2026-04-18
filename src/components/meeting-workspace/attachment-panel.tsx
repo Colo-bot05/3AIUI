@@ -65,28 +65,41 @@ export function AttachmentPanel({
                   <div className="truncate text-sm font-semibold text-zinc-950">
                     {attachment.filename}
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-500">
-                    <span>{attachment.extension}</span>
-                    <span>{formatFileSize(attachment.size)}</span>
-                    <span>
+                  <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-mono uppercase tracking-[0.18em]">
+                    <span className="text-zinc-500">{attachment.extension}</span>
+                    <span className="text-zinc-500">{formatFileSize(attachment.size)}</span>
+                    <span
+                      className={
+                        attachment.status === "ready"
+                          ? "text-emerald-700"
+                          : isHardAttachmentError(attachment.error)
+                            ? "text-rose-600"
+                            : "text-amber-700"
+                      }
+                    >
                       {attachment.status === "ready"
-                        ? "ready"
+                        ? "ready · sent to AI"
                         : isHardAttachmentError(attachment.error)
-                          ? "error"
-                          : "no preview"}
+                          ? "error · not sent"
+                          : "extract failed · not sent"}
                     </span>
                   </div>
-                  {attachment.error && isHardAttachmentError(attachment.error) ? (
-                    <p className="mt-2 text-xs leading-6 text-rose-600">
-                      {attachment.error}
+                  {attachment.status === "error" ? (
+                    <p
+                      className={`mt-2 text-xs leading-6 ${
+                        isHardAttachmentError(attachment.error)
+                          ? "text-rose-600"
+                          : "text-amber-700"
+                      }`}
+                    >
+                      {attachment.error ?? "ファイル解析に失敗しました。"}
+                      この資料は AI に送信されません。
                     </p>
                   ) : (
                     <p className="mt-2 line-clamp-3 text-xs leading-6 text-zinc-600">
-                      {attachment.error && !isHardAttachmentError(attachment.error)
-                        ? "プレビューなし"
-                        : hasReadableAttachmentPreview(attachment.excerpt)
+                      {hasReadableAttachmentPreview(attachment.excerpt)
                         ? attachment.excerpt
-                        : "プレビューなし"}
+                        : "プレビュー短め（本文は AI へ送信済み）"}
                     </p>
                   )}
                 </div>
