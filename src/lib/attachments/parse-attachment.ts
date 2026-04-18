@@ -1,6 +1,5 @@
 import JSZip from "jszip";
 import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
 
 import {
   MAX_ATTACHMENT_EXCERPT_LENGTH,
@@ -119,20 +118,52 @@ async function parseDocxFile(buffer: Buffer) {
 
 async function parsePdfFile(buffer: Buffer) {
   try {
-    const parser = new PDFParse({ data: buffer });
-    const result = await parser.getText();
-    await parser.destroy();
-    const normalizedText = normalizeExtractedText(result.text);
+    const path = await import("node:path");
+    const { pathToFileURL } = await import("node:url");
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const pdfjsRoot = path.resolve(
+      process.cwd(),
+      "node_modules/pdfjs-dist",
+    );
+    pdfjs.GlobalWorkerOptions.workerSrc = path.join(
+      pdfjsRoot,
+      "legacy/build/pdf.worker.mjs",
+    );
+    const data = new Uint8Array(buffer);
+    const loadingTask = pdfjs.getDocument({
+      data,
+      cMapUrl: pathToFileURL(path.join(pdfjsRoot, "cmaps") + "/").href,
+      cMapPacked: true,
+      standardFontDataUrl: pathToFileURL(
+        path.join(pdfjsRoot, "standard_fonts") + "/",
+      ).href,
+      isEvalSupported: false,
+      useSystemFonts: false,
+      disableFontFace: true,
+      verbosity: 0,
+    });
+    const doc = await loadingTask.promise;
+    const pageTexts: string[] = [];
+    try {
+      for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
+        const page = await doc.getPage(pageNumber);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item) => ("str" in item ? (item as { str: string }).str : ""))
+          .filter(Boolean)
+          .join(" ");
+        if (pageText) {
+          pageTexts.push(pageText);
+        }
+        page.cleanup();
+      }
+    } finally {
+      await doc.destroy();
+    }
+    const normalizedText = normalizeExtractedText(pageTexts.join("\n\n"));
     return isLowQualityExtractedText(normalizedText) ? "" : normalizedText;
   } catch {
-    const printableText = buffer
-      .toString("latin1")
-      .match(/\(([^\)]{2,})\)/g)
-      ?.map((value) => value.slice(1, -1))
-      .join(" ");
-
-    const normalizedText = normalizeExtractedText(printableText ?? "");
-    return isLowQualityExtractedText(normalizedText) ? "" : normalizedText;
+    return "";
   }
 }
 
