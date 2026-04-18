@@ -19,10 +19,10 @@ import type {
 const XML_TEXT_PATTERN = /<(?:\w+:)?t\b[^>]*>(.*?)<\/(?:\w+:)?t>/g;
 const SHEET_FILE_PATTERN = /^xl\/worksheets\/sheet\d+\.xml$/;
 const SLIDE_FILE_PATTERN = /^ppt\/slides\/slide\d+\.xml$/;
+// Characters that count as "real text": Japanese scripts, ASCII alnum, and
+// common Japanese / ASCII punctuation that legitimate presentation PDFs use.
 const READABLE_TEXT_PATTERN =
-  /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z0-9]/gu;
-const SUSPICIOUS_TEXT_PATTERN =
-  /[^\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z0-9\s.,:;!?()[\]'"\-_/]/gu;
+  /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z0-9、。「」『』（）［］【】〈〉《》〔〕・ー〜!?！？,.:;()\[\]'"]/gu;
 
 function escapeXml(value: string) {
   return value
@@ -49,6 +49,9 @@ function truncateText(value: string, maxLength: number) {
   return `${value.slice(0, maxLength).trimEnd()}\n\n[truncated]`;
 }
 
+const LETTER_ONLY_PATTERN =
+  /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}A-Za-z0-9]/gu;
+
 function isLowQualityExtractedText(value: string) {
   const normalizedValue = normalizeExtractedText(value);
   const compactValue = normalizedValue.replace(/\s/g, "");
@@ -57,14 +60,22 @@ function isLowQualityExtractedText(value: string) {
     return true;
   }
 
+  // Require at least a handful of real letters / digits / script characters.
+  // A scan-only PDF that produced only parenthesized stream fragments has no
+  // letters and should still fall through to the "extract failed" state.
+  const letterCount = normalizedValue.match(LETTER_ONLY_PATTERN)?.length ?? 0;
+  if (letterCount < 4) {
+    return true;
+  }
+
   const readableCharacters =
     normalizedValue.match(READABLE_TEXT_PATTERN)?.length ?? 0;
-  const suspiciousCharacters =
-    normalizedValue.match(SUSPICIOUS_TEXT_PATTERN)?.length ?? 0;
   const readableRatio = readableCharacters / Math.max(compactValue.length, 1);
-  const suspiciousRatio = suspiciousCharacters / Math.max(compactValue.length, 1);
 
-  return readableRatio < 0.45 || suspiciousRatio > 0.2;
+  // Japanese presentation PDFs often contain lots of legitimate punctuation
+  // (「」、。・ etc.) that the old "suspicious-char" ratio falsely flagged.
+  // Only bail when the text is overwhelmingly non-language bytes.
+  return readableRatio < 0.3;
 }
 
 function buildAttachmentId() {
