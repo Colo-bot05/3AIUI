@@ -9,7 +9,12 @@
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "infra:install": "cd infra && npm install",
+    "infra:synth": "cd infra && npm run synth",
+    "infra:diff": "cd infra && npm run diff",
+    "infra:deploy": "cd infra && npm run deploy",
+    "infra:destroy": "cd infra && npm run destroy"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
